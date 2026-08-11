@@ -1,0 +1,22 @@
+# Контекст сборки — корень репозитория, поэтому лишнее сюда попадать не должно:
+# node_modules весит сотни мегабайт и каждый раз пересылается демону Docker.
+
+**/node_modules
+**/.nuxt
+**/.output
+**/.venv
+**/__pycache__
+**/*.pyc
+**/.mypy_cache
+**/.ruff_cache
+**/.pytest_cache
+**/*.egg-info
+
+# Секреты в образ не попадают
+.env
+
+# Документация и артефакты, не нужные при сборке
+docs/
+*.md
+!backend/tests/fixtures/README.md
+.git/

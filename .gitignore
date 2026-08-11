@@ -1,0 +1,27 @@
+# Секреты: переменные окружения и SSH-ключи от ВМ
+.env
+*.pem
+*.ppk
+id_*
+!id_*.pub
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+*.egg-info/
+
+# Node / Nuxt
+node_modules/
+.nuxt/
+.output/
+dist/
+
+# Прочее
+.DS_Store
+
+# Входные материалы кейса с реальными доступами к стендам
+ФАЙЛИК ДЛЯ САШИ.md
