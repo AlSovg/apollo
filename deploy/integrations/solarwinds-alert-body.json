@@ -1,0 +1,12 @@
+{
+  "eventType": "trigger",
+  "name": "${N=Alerting;M=AlertName}",
+  "severity": "${N=Alerting;M=Severity}",
+  "message": "${N=Alerting;M=AlertMessage}",
+  "description": "${N=Alerting;M=AlertDescription}",
+  "objectid": "${N=Alerting;M=ObjectID}",
+  "node": "${N=SwisEntity;M=Caption}",
+  "ip": "${N=SwisEntity;M=IPAddress}",
+  "group": "${N=SwisEntity;M=CustomProperties.Department}",
+  "time": "${N=Alerting;M=AlertTriggerTime;F=DateTime}"
+}
