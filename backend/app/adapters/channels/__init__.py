@@ -32,8 +32,8 @@ def build_channels(settings: Settings) -> dict[str, NotificationChannel]:
         "trueconf": TrueConfChannel(
             TrueConfSettings(
                 base_url=settings.trueconf_base_url,
-                client_id=settings.trueconf_client_id,
-                client_secret=settings.trueconf_client_secret,
+                username=settings.trueconf_username,
+                password=settings.trueconf_password,
                 verify_tls=settings.trueconf_verify_tls,
             )
         ),

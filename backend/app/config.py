@@ -103,9 +103,10 @@ class Settings(BaseSettings):
     # Квитирование заложено структурно, но в прототипе выключено (FR-FUT-1)
     feature_ack: bool = False
 
+    # Бот TrueConf — обычная учётка сервера (контракт Chatbot Connector 5.5)
     trueconf_base_url: str = ""
-    trueconf_client_id: str = ""
-    trueconf_client_secret: str = ""
+    trueconf_username: str = ""
+    trueconf_password: str = ""
     trueconf_verify_tls: bool = True
 
     @property

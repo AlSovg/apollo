@@ -45,8 +45,8 @@ services:
       context: ..
       dockerfile: deploy/mocks/trueconf/Dockerfile
     environment:
-      MOCK_CLIENT_ID: apollo
-      MOCK_CLIENT_SECRET: apollo-secret
+      MOCK_USERNAME: apollo-bot
+      MOCK_PASSWORD: apollo-bot-pass
     ports:
       - "127.0.0.1:18080:8080"
     networks: [internal]

@@ -20,6 +20,9 @@ dependencies = [
     "pyjwt>=2.9",
     # Клиент серверного API TrueConf и локальной модели
     "httpx>=0.27",
+    # Chatbot Connector TrueConf 5.5 — WebSocket, httpx его не умеет.
+    # Согласовано отдельно: боевой сервер не поддерживает REST-отправку сообщений
+    "websockets>=13.0",
 ]
 
 [project.optional-dependencies]

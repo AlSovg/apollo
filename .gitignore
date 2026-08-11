@@ -25,3 +25,5 @@ dist/
 
 # Входные материалы кейса с реальными доступами к стендам
 ФАЙЛИК ДЛЯ САШИ.md
+trueconf_checkup.md
+.trueconf_admin_pass.txt
