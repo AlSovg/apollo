@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.adapters.identity import verify_password
 from app.cli import _create_admin, _list_role_mappings, _map_role, _unmap_role
 from app.models.identity import RoleMapping, User, UserRole
-from app.seed import DEMO_ROLE_MAPPINGS, _seed
+from app.seed import DEMO_ROLE_MAPPINGS, DEMO_TOPICS, _seed
 
 
 @pytest.fixture(autouse=True)
@@ -107,7 +107,7 @@ async def test_seed_is_idempotent(db_session: AsyncSession) -> None:
     await _seed(db_session)
 
     topics = (await db_session.execute(select(Topic.code))).scalars().all()
-    assert sorted(topics) == ["all-events", "prod-db"]
+    assert sorted(topics) == sorted(spec["code"] for spec in DEMO_TOPICS)
 
     mappings = (await db_session.execute(select(RoleMapping))).scalars().all()
     assert len(mappings) == len(DEMO_ROLE_MAPPINGS)

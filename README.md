@@ -59,13 +59,32 @@ cp .env.example .env        # заполнить секреты
 cd deploy
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 docker compose exec backend alembic upgrade head              # схема и справочники
-docker compose exec backend python -m app.cli create-admin breakglass
-docker compose exec backend python -m app.seed                # темы и роли групп
+docker compose exec backend python -m app.cli create-admin breakglass --password 'Demo-stand-2026'
+docker compose exec backend python -m app.seed                # каталог тем и роли групп
+docker compose exec backend python -m app.demo_seed --password 'Demo-stand-2026'
 curl localhost/health       # 200 — живой
 ```
 
-Интерфейс — http://localhost. Логин — `breakglass` и пароль, который
-`create-admin` печатает один раз в консоль (сохранить сразу).
+Интерфейс — http://localhost. Учётные записи — в разделе
+[«Учётные записи стенда»](#учётные-записи-стенда) ниже.
+
+`--password` у обеих команд задаёт известный пароль вместо случайного: он
+нужен, чтобы креды совпали с написанным здесь. Без флага `create-admin` и
+`demo_seed` генерируют пароль и печатают его один раз — так и надо делать
+везде, кроме разборного стенда.
+
+`app.seed` заводит только каталог тем, событий не создаёт — после чистого
+`up` инбокс пуст. `app.demo_seed` доводит стенд до состояния «есть что
+показать»: четыре локальных пользователя с разными ролями и каналами
+доставки, добровольные подписки и набор инцидентов Zabbix/SolarWinds разной
+давности и критичности. Инциденты не пишутся в таблицы напрямую, а проходят
+теми же `process_batch`/`route_batch`, что крутят воркеры. Пароли печатаются
+один раз при создании; `--reset` возвращает стенд к чистому состоянию.
+
+`.env.example` из коробки указывает на моки dev-оверлея — TrueConf и сводки
+LLM работают без единого внешнего адреса. Исключение одно: `SMTP_HOST` пуст,
+почтовый релей не воспроизводится, поэтому уведомления канала `email` штатно
+уходят в `failed`. Веб-инбокс и TrueConf при этом работают.
 
 `.env.example` по умолчанию ставит `AUTH_PROVIDER=local` — этого достаточно
 для первого запуска и локальной разработки, боевой AD не нужен. Значение
@@ -76,6 +95,56 @@ curl localhost/health       # 200 — живой
 
 Подробности, продовый контур и отличия dev-оверлея —
 [docs/deployment.md](docs/deployment.md).
+
+## Учётные записи стенда
+
+> Всё ниже — реквизиты разборного демонстрационного стенда, поднятого под
+> защиту кейса. Домен `apollo.test` и его учётки существуют только для
+> проверки ветки AD и гасятся вместе со стендом. В продуктивном контуре
+> секретов в репозитории нет: `.env` не коммитится, пароли задаются при
+> развёртывании, а `create-admin` и `demo_seed` без `--password` печатают
+> сгенерированный пароль один раз.
+
+### Без AD — `AUTH_PROVIDER=local`
+
+Ветка первого запуска: каталог не нужен, учётки заводят команды из «Быстрого
+старта». Пароль — тот, что передан в `--password` (в примерах выше
+`Demo-stand-2026`).
+
+| Логин | Роль | Что показывает |
+|---|---|---|
+| `breakglass` | admin | админка: темы, источники, пользователи, аудит, дашборд платформы |
+| `duty.engineer` | engineer | инбокс дежурного, обязательные подписки + добровольная с email |
+| `shift.lead` | engineer | второй дежурный: подписки с каналами TrueConf и email |
+| `noc.viewer` | viewer | наблюдатель сети: обязательная подписка `network-core` |
+| `service.owner` | viewer | владелец сервиса: узкая подписка только на `web-prod` |
+
+### С AD — `AUTH_PROVIDER=ldap`
+
+Samba AD DC (контейнер `apollo-ad`, домен `apollo.test`). Учётки заводятся в
+платформе сами при первом входе, роли приезжают из групп каталога через
+сопоставления из `app.seed`. Пароль у всех пятерых общий — `aQI73TgceNCQmICE`.
+
+| Логин | Группа AD | Роль | Что показывает |
+|---|---|---|---|
+| `ad.admin` | platform-admins | admin | админка под доменной учёткой |
+| `ad.duty` | noc-engineers | engineer | инбокс, роль получена из группы AD |
+| `ad.eng` | noc-engineers | engineer | второй инженер той же группы |
+| `ad.viewer` | service-owners | viewer | наблюдатель |
+| `ad.nobody` | — | без ролей | вход есть, доступа к данным нет — проверка RBAC |
+
+Администратор домена — `Administrator` / `Hk8WsDoyYq1qEEHNOdKO` (он же
+`LDAP_BIND_PASSWORD`). Сменить пароль доменной учётки:
+
+```bash
+docker exec apollo-ad samba-tool user setpassword ad.duty --newpassword='...'
+```
+
+**Важно:** пока каталог доступен, локальные учётки (`breakglass` и демо-
+пользователи) войти не могут — при `AUTH_PROVIDER=ldap` вход идёт только
+через AD. Локальный провайдер включается как аварийный, если каталог лёг
+(FR-IDM-7). Это не дефект, а требование: отказ AD не должен запирать вход в
+саму платформу.
 
 ## Документация
 

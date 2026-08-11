@@ -6,10 +6,16 @@
 `app.seed` заводит темы и подписки, но намеренно не трогает события — это
 техдолг был правильным решением на шаге сборки, где ещё не было конвейера
 нормализации, но после первого `docker compose up` он превращается в пустой
-инбокс без единого уведомления. Эта команда закрывает разрыв: заводит два
-локальных пользователя с разными ролями (заглушка на случай, если LDAP ещё
-не поднят — та же логика, что у `python -m app.cli create-admin`) и прогоняет
-набор инцидентов Zabbix/SolarWinds разной давности и критичности.
+инбокс без единого уведомления. Эта команда закрывает разрыв: заводит четырёх
+локальных пользователей с разными ролями, контактами и каналами (заглушка на
+случай, если LDAP ещё не поднят — та же логика, что у `python -m app.cli
+create-admin`) и прогоняет набор инцидентов Zabbix/SolarWinds разной давности
+и критичности.
+
+Данные подобраны под каталог тем из `app.seed`: на каждое поле правила отбора
+есть и попадающий инцидент, и непопадающий. Тема без совпадений или инцидент,
+не попавший никуда, кроме «Все события», — это не пробел в данных, а показ
+того, ради чего темы и нужны.
 
 Инциденты заводятся НЕ прямой записью в incidents/notifications, а как
 настоящие raw_events, пропущенные через `process_batch`/`route_batch` —
@@ -32,18 +38,19 @@ import json
 import secrets
 import string
 import sys
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import delete, select
+from sqlalchemy import CursorResult, delete, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapters.identity import hash_password
 from app.db import get_engine, get_sessionmaker
 from app.models.events import Incident, RawEvent
-from app.models.identity import User, UserRole
+from app.models.identity import User, UserContact, UserRole
 from app.models.subscriptions import Subscription, Topic
 from app.seed import _seed as seed_topics_and_roles
 from app.services.normalizer import process_batch
@@ -53,12 +60,59 @@ from app.services.router import route_batch
 _PASSWORD_ALPHABET = string.ascii_letters + string.digits
 _MOSCOW = ZoneInfo("Europe/Moscow")
 
-# Логины не пересекаются с breakglass из app.cli create-admin. Роль engineer
-# ловит обязательную подписку на тему "prod-db" из app.seed, viewer — нет,
-# поэтому обоих ещё подписываем добровольно на "all-events" ниже.
-DEMO_USERS: list[tuple[str, str]] = [
-    ("duty.engineer", "engineer"),
-    ("noc.viewer", "viewer"),
+
+@dataclass(frozen=True)
+class DemoUser:
+    """Демо-пользователь: роль, контакты, добровольные подписки.
+
+    Обязательные подписки здесь не перечислены — они вычисляются из роли
+    (topic_roles в app.seed) и всегда идут в канал web: так задана вьюха
+    v_effective_subscriptions. Email и TrueConf появляются только через
+    добровольную подписку, поэтому каналы указаны именно тут.
+    """
+
+    username: str
+    role: str
+    # channel → адрес. Ложится в user_contacts — единственную таблицу с ПДн
+    # (раздел 5 AGENTS.md), очищается при переходе на LDAP.
+    contacts: dict[str, str]
+    # код темы → каналы доставки
+    subscriptions: dict[str, list[str]]
+
+
+# Логины не пересекаются с breakglass из app.cli create-admin. Набор подобран
+# так, чтобы на демо было видно разницу: два инженера с обязательными
+# подписками и разными каналами, наблюдатель сети и владелец веб-сервиса.
+DEMO_USERS: list[DemoUser] = [
+    DemoUser(
+        username="duty.engineer",
+        role="engineer",
+        contacts={"email": "duty.engineer@apollo.test", "trueconf": "duty.engineer"},
+        # обязательные по роли engineer: prod-db, critical-any, scada-asu
+        subscriptions={"all-events": ["web"], "web-prod": ["web", "email"]},
+    ),
+    DemoUser(
+        username="shift.lead",
+        role="engineer",
+        contacts={"email": "shift.lead@apollo.test", "trueconf": "shift.lead"},
+        # TrueConf — на старшего смены: канал обязателен по условиям кейса,
+        # и на демо он должен на ком-то реально сработать
+        subscriptions={"network-core": ["web", "trueconf"], "sla-watch": ["web", "email"]},
+    ),
+    DemoUser(
+        username="noc.viewer",
+        role="viewer",
+        contacts={"email": "noc.viewer@apollo.test"},
+        # обязательная по роли viewer: network-core
+        subscriptions={"all-events": ["web"]},
+    ),
+    DemoUser(
+        username="service.owner",
+        role="viewer",
+        contacts={},
+        # владелец сервиса подписан узко — только своя группа объектов
+        subscriptions={"web-prod": ["web"]},
+    ),
 ]
 
 
@@ -79,6 +133,7 @@ def _zabbix_payload(
     resolved: bool,
     minutes_ago: float,
     value: str,
+    tags: list[str] | None = None,
 ) -> dict[str, Any]:
     moment = _ago(minutes_ago)
     return {
@@ -98,7 +153,8 @@ def _zabbix_payload(
         "date": moment.strftime("%Y.%m.%d"),
         "time": moment.strftime("%H:%M:%S"),
         "item_lastvalue": value,
-        "tags": ["demo"],
+        # Теги решают, попадёт ли событие в темы с tags_any / tags_all
+        "tags": tags if tags is not None else ["demo"],
         "message": f"{'Resolved' if resolved else 'Problem'}: {trigger_name}\nHost: {host}",
     }
 
@@ -112,11 +168,15 @@ def _solarwinds_payload(
     resolved: bool,
     minutes_ago: float,
     cpu: str,
+    group: str,
 ) -> dict[str, Any]:
     moment = _ago(minutes_ago)
     return {
         "name": name,
         "severity": severity_label,
+        # Плоский ключ group адаптер кладёт в object_group — по нему работают
+        # темы с object_groups
+        "group": group,
         # Формат reset-события не подтверждён на боевом стенде (открытый вопрос
         # 1 в docs/tz.md) — используется та же гипотеза, что в tools/load_generator.py
         "status": "Reset" if resolved else "Triggered",
@@ -135,10 +195,17 @@ def _payload_hash(payload: dict[str, Any]) -> bytes:
 def _demo_raw_events() -> list[tuple[str, dict[str, Any]]]:
     """(source, payload) в порядке отправки. Разная давность и критичность —
     приёмка шага 14 build-prompts.md: "набор инцидентов разной давности и severity".
+
+    Набор подобран под каталог тем из app.seed: на каждое поле MatchRule есть
+    инцидент, который под него попадает, и инцидент, который не попадает.
+    Тема без единого совпадения на демо выглядит как сломанная маршрутизация.
     """
     events: list[tuple[str, dict[str, Any]]] = []
 
-    # A: Disaster, только что открылся — самый свежий и самый громкий инцидент
+    # --- Zabbix -------------------------------------------------------------
+
+    # A: Disaster, только что открылся — самый свежий и самый громкий инцидент.
+    #    Теги scada + группа Приобье → тема scada-asu (object_groups + tags_any)
     events.append((
         "zabbix",
         _zabbix_payload(
@@ -146,10 +213,12 @@ def _demo_raw_events() -> list[tuple[str, dict[str, Any]]]:
             trigger_id="90101", trigger_name="Недоступен узел",
             nseverity="5", severity_label="Disaster",
             resolved=False, minutes_ago=6, value="0",
+            tags=["demo", "scada", "prod"],
         ),
     ))
 
-    # B: High, открыт почти час — на грани "незамеченного простоя" из AGENTS.md
+    # B: High, открыт почти час — на грани "незамеченного простоя" из AGENTS.md.
+    #    Теги sla + prod → единственная пара, дающая совпадение по tags_all
     events.append((
         "zabbix",
         _zabbix_payload(
@@ -157,6 +226,7 @@ def _demo_raw_events() -> list[tuple[str, dict[str, Any]]]:
             trigger_id="90102", trigger_name="Диск заполнен на 94%",
             nseverity="4", severity_label="High",
             resolved=False, minutes_ago=47, value="94",
+            tags=["demo", "sla", "prod"],
         ),
     ))
 
@@ -170,6 +240,7 @@ def _demo_raw_events() -> list[tuple[str, dict[str, Any]]]:
                 trigger_id="90103", trigger_name="Высокая загрузка CPU",
                 nseverity="3", severity_label="Average",
                 resolved=False, minutes_ago=minutes_ago, value=value,
+                tags=["demo", "prod"],
             ),
         ))
 
@@ -181,6 +252,7 @@ def _demo_raw_events() -> list[tuple[str, dict[str, Any]]]:
             trigger_id="90104", trigger_name="Растёт время отклика",
             nseverity="2", severity_label="Warning",
             resolved=False, minutes_ago=26 * 60, value="1200",
+            tags=["demo", "prod"],
         ),
     ))
     events.append((
@@ -193,30 +265,95 @@ def _demo_raw_events() -> list[tuple[str, dict[str, Any]]]:
         ),
     ))
 
-    # E: Critical (SolarWinds), узел сети недоступен — открыт 12 минут
+    # E: High на второй площадке АСУ ТП, три повтора за полтора часа — второй
+    #    случай дедупликации, на этот раз на критичном инциденте
+    for minutes_ago, value in ((95, "78"), (70, "83"), (33, "88"), (11, "92")):
+        events.append((
+            "zabbix",
+            _zabbix_payload(
+                event_id="demo-905", host="gpn-scada-11", hostgroup="АСУ ТП / Приобье",
+                trigger_id="90105", trigger_name="Температура выше нормы",
+                nseverity="4", severity_label="High",
+                resolved=False, minutes_ago=minutes_ago, value=value,
+                tags=["demo", "asu-tp", "sla", "prod"],
+            ),
+        ))
+
+    # F: Average по веб-группе — попадает и в web-prod, и в sla-watch
+    events.append((
+        "zabbix",
+        _zabbix_payload(
+            event_id="demo-906", host="gpn-web-02", hostgroup="Веб prod",
+            trigger_id="90106", trigger_name="Ошибки 5xx выше порога",
+            nseverity="3", severity_label="Average",
+            resolved=False, minutes_ago=15, value="4.7",
+            tags=["demo", "sla", "prod"],
+        ),
+    ))
+
+    # G: Disaster, закрытый пять часов назад — на дашборде даёт непустой MTTR
+    events.append((
+        "zabbix",
+        _zabbix_payload(
+            event_id="demo-907", host="gpn-db-prod-05", hostgroup="БД prod",
+            trigger_id="90107", trigger_name="Репликация остановлена",
+            nseverity="5", severity_label="Disaster",
+            resolved=False, minutes_ago=5 * 60, value="0",
+            tags=["demo", "sla", "prod"],
+        ),
+    ))
+    events.append((
+        "zabbix",
+        _zabbix_payload(
+            event_id="demo-907", host="gpn-db-prod-05", hostgroup="БД prod",
+            trigger_id="90107", trigger_name="Репликация остановлена",
+            nseverity="5", severity_label="Disaster",
+            resolved=True, minutes_ago=5 * 60 - 38, value="1",
+        ),
+    ))
+
+    # H: Information на стенде — тот самый шум, ради которого и нужны темы.
+    #    Не попадает никуда, кроме all-events: дежурный его не увидит
+    events.append((
+        "zabbix",
+        _zabbix_payload(
+            event_id="demo-908", host="gpn-app-09", hostgroup="Прочее / stage",
+            trigger_id="90108", trigger_name="Перезапуск службы",
+            nseverity="1", severity_label="Information",
+            resolved=False, minutes_ago=3 * 60, value="1",
+            tags=["demo", "stage"],
+        ),
+    ))
+
+    # --- SolarWinds ---------------------------------------------------------
+
+    # I: Critical, узел сети недоступен — открыт 12 минут
     events.append((
         "solarwinds",
         _solarwinds_payload(
             name="Node Down", node="gpn-net-msk-14", ip="10.30.14.1",
             severity_label="Critical", resolved=False, minutes_ago=12, cpu="0",
+            group="Сеть / Магистраль",
         ),
     ))
 
-    # F: Serious (SolarWinds), высокая загрузка — открыт больше часа
+    # J: Serious, высокая загрузка — открыт больше часа
     events.append((
         "solarwinds",
         _solarwinds_payload(
             name="High CPU Utilization", node="gpn-net-spb-03", ip="10.30.3.10",
             severity_label="Serious", resolved=False, minutes_ago=85, cpu="91",
+            group="Сеть / Магистраль",
         ),
     ))
 
-    # G: Warning (SolarWinds), закрыт позавчера — тоже с лентой problem + resolved
+    # K: Warning, закрыт позавчера — тоже с лентой problem + resolved
     events.append((
         "solarwinds",
         _solarwinds_payload(
             name="Interface Errors", node="gpn-net-tmn-02", ip="10.30.2.5",
             severity_label="Warning", resolved=False, minutes_ago=2 * 24 * 60, cpu="0",
+            group="Сеть / Регионы",
         ),
     ))
     events.append((
@@ -224,6 +361,59 @@ def _demo_raw_events() -> list[tuple[str, dict[str, Any]]]:
         _solarwinds_payload(
             name="Interface Errors", node="gpn-net-tmn-02", ip="10.30.2.5",
             severity_label="Warning", resolved=True, minutes_ago=2 * 24 * 60 - 35, cpu="0",
+            group="Сеть / Регионы",
+        ),
+    ))
+
+    # L: Serious с двумя повторами — дедупликация работает и на втором источнике
+    for minutes_ago in (40, 18):
+        events.append((
+            "solarwinds",
+            _solarwinds_payload(
+                name="Packet Loss", node="gpn-net-msk-02", ip="10.30.2.1",
+                severity_label="Serious", resolved=False, minutes_ago=minutes_ago, cpu="12",
+                group="Сеть / Магистраль",
+            ),
+        ))
+
+    # M: балансировщик в группе «Веб prod» — тема web-prod задана без sources,
+    #    поэтому ловит объект из SolarWinds наравне с Zabbix
+    events.append((
+        "solarwinds",
+        _solarwinds_payload(
+            name="Response Time High", node="gpn-web-lb-01", ip="10.20.0.9",
+            severity_label="Warning", resolved=False, minutes_ago=28, cpu="44",
+            group="Веб prod",
+        ),
+    ))
+
+    # N: Critical, закрытый девять часов назад — MTTR по сетевому контуру
+    events.append((
+        "solarwinds",
+        _solarwinds_payload(
+            name="Node Down", node="gpn-net-nsk-07", ip="10.30.7.1",
+            severity_label="Critical", resolved=False, minutes_ago=9 * 60, cpu="0",
+            group="Сеть / Регионы",
+        ),
+    ))
+    events.append((
+        "solarwinds",
+        _solarwinds_payload(
+            name="Node Down", node="gpn-net-nsk-07", ip="10.30.7.1",
+            severity_label="Critical", resolved=True, minutes_ago=9 * 60 - 52, cpu="3",
+            group="Сеть / Регионы",
+        ),
+    ))
+
+    # O: тот же узел, что в I, но другой алерт — проверяет, что external_key
+    #    склеен из узла И имени правила, иначе инциденты затёрли бы друг друга.
+    #    Notice ниже порога network-core, поэтому уведомлений не породит
+    events.append((
+        "solarwinds",
+        _solarwinds_payload(
+            name="Interface Down", node="gpn-net-msk-14", ip="10.30.14.1",
+            severity_label="Notice", resolved=False, minutes_ago=55, cpu="0",
+            group="Сеть / Магистраль",
         ),
     ))
 
@@ -245,22 +435,28 @@ async def _insert_raw_events(session: AsyncSession) -> int:
     return inserted
 
 
-async def _seed_users(session: AsyncSession) -> list[str]:
+async def _seed_users(session: AsyncSession, password: str | None = None) -> list[str]:
     """Локальные демо-пользователи с ролями. Пароль печатается только при
     первом создании — реген при каждом запуске сломал бы уже настроенное
     для показа демо (пользователь мог войти заранее и что-то себе подписать).
+
+    `password` задаёт всем один известный пароль вместо случайного. Нужен
+    там, где креды должны совпасть с написанным в README, — на разборном
+    стенде и при передаче кода на проверку. В бою так не делают.
     """
     printed: list[str] = []
-    for username, role_code in DEMO_USERS:
+    for demo in DEMO_USERS:
         existing = (
-            await session.execute(select(User).where(User.username == username))
+            await session.execute(select(User).where(User.username == demo.username))
         ).scalar_one_or_none()
 
         if existing is None:
-            secret = "".join(secrets.choice(_PASSWORD_ALPHABET) for _ in range(20))
+            secret = password or "".join(
+                secrets.choice(_PASSWORD_ALPHABET) for _ in range(20)
+            )
             user = User(
-                subject_id=f"local:{username}",
-                username=username,
+                subject_id=f"local:{demo.username}",
+                username=demo.username,
                 provider="local",
                 password_hash=hash_password(secret),
                 is_active=True,
@@ -268,44 +464,83 @@ async def _seed_users(session: AsyncSession) -> list[str]:
             session.add(user)
             await session.flush()
             user_id = user.id
-            printed.append(f"{username:14} роль={role_code:10} пароль={secret}")
+            printed.append(f"{demo.username:14} роль={demo.role:10} пароль={secret}")
         else:
             user_id = existing.id
 
         await session.execute(
             insert(UserRole)
-            .values(user_id=user_id, role_code=role_code, source="local")
+            .values(user_id=user_id, role_code=demo.role, source="local")
             .on_conflict_do_nothing()
         )
+
+        # Без контакта доставка в email/TrueConf останется без адреса и уйдёт
+        # в ошибку — на демо это выглядит как неработающий канал
+        for channel, address in demo.contacts.items():
+            await session.execute(
+                insert(UserContact)
+                .values(user_id=user_id, channel=channel, address=address)
+                .on_conflict_do_nothing(constraint="user_contacts_pk")
+            )
 
     await session.flush()
     return printed
 
 
-async def _subscribe_to_all_events(session: AsyncSession) -> None:
-    """viewer не входит в mandatory_roles темы 'all-events' (см. app.seed) —
-    без добровольной подписки его инбокс на демо останется пустым.
-    """
-    topic_id = (
-        await session.execute(select(Topic.id).where(Topic.code == "all-events"))
-    ).scalar_one()
+async def _seed_subscriptions(session: AsyncSession) -> int:
+    """Добровольные подписки демо-пользователей.
 
-    for username, _role in DEMO_USERS:
+    Обязательные подписки не заводятся строками — они вычисляются из ролей
+    (v_effective_subscriptions) и всегда идут в web. Всё, что здесь, — это
+    origin='self': то, что пользователь мог бы включить себе сам, включая
+    выбор каналов email и trueconf.
+    """
+    topic_ids: dict[str, int] = {
+        row.code: row.id
+        for row in (await session.execute(select(Topic.code, Topic.id))).all()
+    }
+
+    created = 0
+    for demo in DEMO_USERS:
         user_id = (
-            await session.execute(select(User.id).where(User.username == username))
+            await session.execute(select(User.id).where(User.username == demo.username))
         ).scalar_one()
-        await session.execute(
-            insert(Subscription)
-            .values(user_id=user_id, topic_id=topic_id, origin="self", channels=["web"])
-            .on_conflict_do_nothing(constraint="subscriptions_uq")
-        )
+        for topic_code, channels in demo.subscriptions.items():
+            topic_id = topic_ids.get(topic_code)
+            if topic_id is None:  # тему удалили руками — не падаем на демо
+                print(f"  внимание: темы '{topic_code}' нет, подписка пропущена")
+                continue
+            inserted = (
+                await session.execute(
+                    insert(Subscription)
+                    .values(
+                        user_id=user_id,
+                        topic_id=topic_id,
+                        origin="self",
+                        channels=channels,
+                    )
+                    .on_conflict_do_nothing(constraint="subscriptions_uq")
+                    .returning(Subscription.id)
+                )
+            ).scalar_one_or_none()
+            if inserted is not None:
+                created += 1
+
     await session.flush()
+    return created
 
 
 _DEMO_EXTERNAL_KEYS: dict[str, list[str]] = {
-    "zabbix": ["demo-901", "demo-902", "demo-903", "demo-904"],
-    "solarwinds": ["gpn-net-msk-14|Node Down", "gpn-net-spb-03|High CPU Utilization",
-                    "gpn-net-tmn-02|Interface Errors"],
+    "zabbix": [f"demo-{number}" for number in range(901, 909)],
+    "solarwinds": [
+        "gpn-net-msk-14|Node Down",
+        "gpn-net-msk-14|Interface Down",
+        "gpn-net-spb-03|High CPU Utilization",
+        "gpn-net-tmn-02|Interface Errors",
+        "gpn-net-msk-02|Packet Loss",
+        "gpn-web-lb-01|Response Time High",
+        "gpn-net-nsk-07|Node Down",
+    ],
 }
 
 
@@ -325,10 +560,14 @@ async def _reset(session: AsyncSession) -> None:
             await session.delete(incident)
         removed_incidents += len(rows)
 
-    usernames = [username for username, _role in DEMO_USERS]
-    removed_users = (
-        await session.execute(delete(User).where(User.username.in_(usernames)))
-    ).rowcount
+    # Контакты, роли и подписки уезжают каскадом за пользователем
+    usernames = [demo.username for demo in DEMO_USERS]
+    # execute() типизирован как Result, счётчик строк есть только у CursorResult
+    deleted: CursorResult[Any] = cast(
+        "CursorResult[Any]",
+        await session.execute(delete(User).where(User.username.in_(usernames))),
+    )
+    removed_users = deleted.rowcount
 
     await session.flush()
     print(f"Удалено демо-инцидентов: {removed_incidents}, демо-пользователей: {removed_users}")
@@ -338,6 +577,11 @@ async def _main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="app.demo_seed")
     parser.add_argument(
         "--reset", action="store_true", help="Сначала убрать демо-инциденты и демо-пользователей"
+    )
+    parser.add_argument(
+        "--password",
+        help="Один известный пароль всем демо-учёткам вместо случайного "
+        "(разборный стенд, передача кода на проверку)",
     )
     args = parser.parse_args(argv)
 
@@ -350,8 +594,8 @@ async def _main(argv: list[str]) -> int:
                 await session.commit()
 
             await seed_topics_and_roles(session)
-            printed_users = await _seed_users(session)
-            await _subscribe_to_all_events(session)
+            printed_users = await _seed_users(session, args.password)
+            subscriptions = await _seed_subscriptions(session)
             await session.commit()
 
             inserted = await _insert_raw_events(session)
@@ -365,14 +609,14 @@ async def _main(argv: list[str]) -> int:
     finally:
         await get_engine().dispose()
 
-    print(f"Новых raw_events: {inserted}")
+    print(f"Новых raw_events: {inserted}, добровольных подписок: {subscriptions}")
     print(f"Обработано нормализатором: {normalized.processed}, ошибок: {normalized.failed}")
     print(f"Инцидентов смаршрутизировано: {routed.size}, уведомлений создано: {routed.created}")
     if printed_users:
         print("\nНовые демо-пользователи (пароль показан один раз):")
         for line in printed_users:
             print(f"  {line}")
-    print("\nГотово. Инбокс — http://localhost, войти под duty.engineer или noc.viewer.")
+    print("\nГотово. Инбокс — http://localhost, войти под любым из демо-пользователей.")
     return 0
 
 
