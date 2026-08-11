@@ -1,0 +1,24 @@
+{
+  "name": "apollo-frontend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "nuxt dev",
+    "build": "nuxt build",
+    "generate": "nuxt generate",
+    "postgenerate": "node scripts/externalize-inline.mjs",
+    "postinstall": "nuxt prepare",
+    "types:api": "openapi-typescript http://localhost/api/v1/openapi.json -o types/api.d.ts"
+  },
+  "dependencies": {
+    "pinia": "^2.2.4"
+  },
+  "devDependencies": {
+    "@pinia/nuxt": "^0.5.5",
+    "nuxt": "^3.13.2",
+    "openapi-typescript": "^7.4.2",
+    "typescript": "^5.6.2",
+    "vue": "^3.5.6",
+    "vue-router": "^4.4.5"
+  }
+}

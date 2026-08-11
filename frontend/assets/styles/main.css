@@ -1,0 +1,237 @@
+/* Корпоративная палитра Газпром нефти.
+   Всё локально: внешние шрифты, CDN и иконочные пакеты запрещены — иначе
+   CSP без unsafe-inline не пройдёт (раздел 2 AGENTS.md). */
+
+:root {
+  /* Фирменные цвета */
+  --gpn-blue: #003d6b;
+  --gpn-light-blue: #0066cc;
+  --gpn-orange: #ff6600;
+  --gpn-light: #f0f6ff;
+  --gpn-gray: #f5f5f5;
+
+  /* Поверхности и текст */
+  --bg: var(--gpn-gray);
+  --bg-panel: #ffffff;
+  --bg-panel-alt: var(--gpn-light);
+  --border: #d6e0ec;
+  --border-strong: #b9c9db;
+  --text: #1a1a1a;
+  --text-dim: #5b6b7c;
+  --accent: var(--gpn-light-blue);
+  --accent-dim: var(--gpn-blue);
+
+  /* Шкала критичности: подобрана под светлый фон, а не под тёмный */
+  --sev-0: #6b7280;
+  --sev-1: #0066cc;
+  --sev-2: #b45309;
+  --sev-3: #ff6600;
+  --sev-4: #cc3333;
+  --sev-5: #8b1a1a;
+
+  --ok: #00aa44;
+  --warn: #ff6600;
+  --error: #cc3333;
+
+  --shadow: 0 1px 3px rgba(0, 61, 107, 0.08);
+  --shadow-strong: 0 2px 8px rgba(0, 61, 107, 0.15);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 1280px;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  background: var(--bg);
+  color: var(--text);
+}
+
+a {
+  color: var(--gpn-light-blue);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+h1 {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--gpn-blue);
+  margin: 0 0 16px;
+}
+
+h2 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--gpn-blue);
+  margin: 0 0 12px;
+}
+
+button,
+select,
+input,
+textarea {
+  font: inherit;
+  color: var(--text);
+  background: #fff;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: #9aa8b6;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--gpn-light-blue);
+  box-shadow: 0 0 0 3px rgba(0, 102, 204, 0.12);
+}
+
+button {
+  cursor: pointer;
+  color: var(--gpn-blue);
+  font-weight: 500;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+button:hover:not(:disabled) {
+  background: var(--gpn-light);
+  border-color: var(--gpn-light-blue);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+button.primary {
+  background: var(--gpn-light-blue);
+  border-color: var(--gpn-light-blue);
+  color: #fff;
+  font-weight: 600;
+}
+
+button.primary:hover:not(:disabled) {
+  background: var(--gpn-blue);
+  border-color: var(--gpn-blue);
+}
+
+button.danger {
+  border-color: var(--error);
+  color: var(--error);
+}
+
+button.danger:hover:not(:disabled) {
+  background: #fdf0f0;
+  border-color: var(--error);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  /* По центру по высоте: в строках соседствуют однострочные значения
+     и двухстрочные (объект с адресом), при выравнивании по верху они
+     visually разъезжаются */
+  vertical-align: middle;
+}
+
+/* Колонка действий. display:flex на самой ячейке ломает раскладку таблицы —
+   кнопки уезжают за правую границу, поэтому только выравнивание и отступы */
+td.actions {
+  text-align: right;
+  white-space: nowrap;
+}
+
+td.actions > button {
+  margin-left: 6px;
+  padding: 4px 10px;
+  font-size: 13px;
+}
+
+/* Цифры в колонках должны выстраиваться столбиком */
+td.mono,
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+th {
+  color: var(--gpn-blue);
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--gpn-light);
+  border-bottom: 2px solid var(--border-strong);
+}
+
+tbody tr:hover {
+  background: var(--gpn-light);
+}
+
+.panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  box-shadow: var(--shadow);
+}
+
+.row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.grid {
+  display: grid;
+  gap: 16px;
+}
+
+.muted {
+  color: var(--text-dim);
+}
+
+.mono {
+  font-family: 'Cascadia Mono', Consolas, 'Courier New', monospace;
+  font-size: 12px;
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  border: 1px solid var(--border-strong);
+  background: var(--gpn-light);
+  color: var(--gpn-blue);
+}
+
+.state {
+  padding: 32px;
+  text-align: center;
+  color: var(--text-dim);
+}
+
+.state.error {
+  color: var(--error);
+}
