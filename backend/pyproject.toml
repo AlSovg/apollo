@@ -1,0 +1,85 @@
+# Бэкенд платформы управления оповещениями. Python 3.12, FastAPI.
+# Зависимости — строго в периметре AGENTS.md, ничего сверх.
+
+[project]
+name = "apollo-backend"
+version = "0.1.0"
+description = "Платформа интеллектуального управления оповещениями — бэкенд"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "sqlalchemy[asyncio]>=2.0.30",
+    "asyncpg>=0.29",
+    "alembic>=1.13",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    # Identity: каталог, хеширование паролей, токены сессий
+    "ldap3>=2.9",
+    "argon2-cffi>=23.1",
+    "pyjwt>=2.9",
+    # Клиент серверного API TrueConf и локальной модели
+    "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2",
+    "pytest-asyncio>=0.24",
+    "httpx>=0.27",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    # Только для разработки под Windows: в системе нет базы часовых поясов IANA.
+    # В контейнере (Debian slim) она есть, в runtime-зависимости пакет не идёт.
+    "tzdata>=2024.1; sys_platform == 'win32'",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+# Промпты — часть поставки: без них воркер сводок не стартует в контейнере
+[tool.setuptools.package-data]
+app = ["prompts/*.md"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle
+    "F",   # pyflakes
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # bugbear
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Depends(...) в значениях по умолчанию — идиома FastAPI, а не ошибка
+"app/api/**/*.py" = ["B008"]
+# В миграциях длинные строки — это DDL и сид-данные, переносить их вредно:
+# ломается читаемость SQL и сверка с db/schema.sql
+"alembic/versions/*.py" = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+files = ["app", "tests"]
+
+# ldap3 не поставляет аннотаций, а types-ldap3 не покрывает используемый API
+[[tool.mypy.overrides]]
+module = ["ldap3.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+# Один цикл событий на прогон: иначе движок БД, созданный сессионной фикстурой,
+# оказывается привязан к чужому циклу
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"

@@ -1,0 +1,11 @@
+{
+  "name": "High CPU Utilization",
+  "severity": "Critical",
+  "status": "Triggered",
+  "node": "WINDOWS-STD3-80",
+  "ip": "83.166.251.15",
+  "cpu": "94",
+  "mem": "71",
+  "resp": "12",
+  "time": "8/10/2026 12:42:10 PM"
+}

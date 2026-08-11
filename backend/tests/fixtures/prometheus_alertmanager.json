@@ -1,0 +1,28 @@
+{
+  "receiver": "apollo",
+  "status": "firing",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "HostOutOfMemory",
+        "instance": "app-prod-07:9100",
+        "severity": "critical",
+        "job": "node-exporter"
+      },
+      "annotations": {
+        "summary": "Свободной памяти меньше 10% на app-prod-07",
+        "description": "Доступно 7.4% памяти в течение 5 минут"
+      },
+      "startsAt": "2026-08-10T12:15:03.481920123Z",
+      "endsAt": "0001-01-01T00:00:00Z",
+      "generatorURL": "http://prometheus:9090/graph",
+      "fingerprint": "a1b2c3d4e5f60718"
+    }
+  ],
+  "groupLabels": { "alertname": "HostOutOfMemory" },
+  "commonLabels": { "severity": "critical" },
+  "externalURL": "http://alertmanager:9093",
+  "version": "4",
+  "groupKey": "{}:{alertname=\"HostOutOfMemory\"}"
+}
