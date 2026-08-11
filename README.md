@@ -64,8 +64,18 @@ docker compose exec backend python -m app.seed                # темы и ро
 curl localhost/health       # 200 — живой
 ```
 
-Интерфейс — http://localhost. Подробности, продовый контур и отличия
-dev-оверлея — [docs/deployment.md](docs/deployment.md).
+Интерфейс — http://localhost. Логин — `breakglass` и пароль, который
+`create-admin` печатает один раз в консоль (сохранить сразу).
+
+`.env.example` по умолчанию ставит `AUTH_PROVIDER=local` — этого достаточно
+для первого запуска и локальной разработки, боевой AD не нужен. Значение
+`local` нужно будет заменить на `ldap` при переходе на боевой каталог —
+без пересборки образов, только переменные окружения и пересоздание
+`backend`/`delivery`, см. [«Вход через боевой AD»](#вход-через-боевой-ad)
+ниже.
+
+Подробности, продовый контур и отличия dev-оверлея —
+[docs/deployment.md](docs/deployment.md).
 
 ## Документация
 
@@ -90,3 +100,50 @@ ruff check && mypy && pytest    # линт, строгая типизация, ~
 
 Тесты идут против настоящего PostgreSQL (dev-оверлей публикует порт 55432)
 и моков внешних систем — LDAP, TrueConf, LLM повторяют реальные контракты.
+
+## Вход через боевой AD
+
+Переключение со стандартного `AUTH_PROVIDER=local` (см. «Быстрый старт») на
+боевой AD — отдельный шаг, не обязательный для первого запуска.
+
+Проверено и работает: авторизация против реального Samba AD DC (`apollo-ad`,
+домен `apollo.test`, контейнер поднят отдельно на ВМ TrueConf,
+`89.208.86.149`), не против мока `osixia/openldap` из dev-оверлея.
+
+Переключение — только переменные окружения, код адаптера не менялся:
+
+```
+AUTH_PROVIDER=ldap
+LDAP_HOST=dc1.apollo.test
+LDAP_PORT=636
+LDAP_USE_SSL=true
+LDAP_BASE_DN=DC=apollo,DC=test
+LDAP_BIND_DN=ad.admin@apollo.test
+LDAP_BIND_PASSWORD=<см. .env, в репозиторий не коммитится>
+```
+
+`LDAP_USERNAME_ATTRIBUTE=sAMAccountName`, `LDAP_ID_ATTRIBUTE=objectGUID`,
+`LDAP_GROUP_OBJECT_CLASS=group` — значения по умолчанию из `config.py`,
+менять не нужно (это атрибуты AD; для мок-OpenLDAP были бы `uid` /
+`entryUUID` / `groupOfNames`).
+
+Резолв имени из TLS-сертификата и CA домена — через `extra_hosts` и volume
+в `deploy/docker-compose.dev.yml` (сервисы `backend`, `delivery`):
+имя `dc1.apollo.test` резолвится на IP ВМ TrueConf, `deploy/ad/ca.pem`
+монтируется в `/certs/ldap-ca.pem`. LDAPS обязателен: адаптер поднимает TLS с
+`CERT_REQUIRED`, простой LDAP без шифрования Samba сама отклоняет
+(`Strong(er) authentication required`).
+
+Сервисная учётка для bind — `ad.admin` (группа `platform-admins`), не
+встроенный `Administrator`: провайдеру нужен только read-доступ для поиска
+записи пользователя, полные права домена ему не нужны.
+
+После смены `.env` пересоздать `backend` и `delivery`:
+
+```bash
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml \
+  up -d --force-recreate backend delivery
+```
+
+Проверено логином `ad.duty`, `ad.admin` (роли синхронизируются из групп AD,
+неверный пароль честно даёт 401).
