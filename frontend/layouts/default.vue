@@ -28,7 +28,10 @@ async function logout() {
 <template>
   <div class="shell">
     <header v-if="showChrome" class="topbar">
-      <NuxtLink to="/" class="brand">Управление оповещениями</NuxtLink>
+      <NuxtLink to="/home" class="brand">
+        <img src="/logo-32.png" alt="" class="brand-mark" width="32" height="32" />
+        <span>Управление оповещениями</span>
+      </NuxtLink>
 
       <nav class="nav">
         <NuxtLink to="/">Инциденты</NuxtLink>
@@ -37,6 +40,7 @@ async function logout() {
           <span v-if="inbox.unread" class="counter">{{ inbox.unread }}</span>
         </NuxtLink>
         <NuxtLink v-if="auth.canSubscribe" to="/subscriptions">Подписки</NuxtLink>
+        <NuxtLink to="/home">О платформе</NuxtLink>
         <template v-if="auth.isAdmin">
           <span class="divider" />
           <NuxtLink to="/admin/dashboard">Платформа</NuxtLink>
@@ -79,10 +83,23 @@ async function logout() {
 }
 
 .brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   font-weight: 700;
   font-size: 15px;
   color: #fff;
   white-space: nowrap;
+}
+
+/* Лого на тёмном фоне-подложке: собственный фон картинки почти совпадает
+   с градиентом шапки, поэтому отделяем его рамкой */
+.brand-mark {
+  display: block;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
 }
 
 .brand:hover {
