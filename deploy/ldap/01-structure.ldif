@@ -1,0 +1,66 @@
+# Тестовый каталог: структура групп воспроизводит боевую (роли платформы).
+# Пароли пользователей — только для стенда, в бою учётки живут в AD.
+
+dn: ou=people,dc=apollo,dc=test
+objectClass: organizationalUnit
+ou: people
+
+dn: ou=groups,dc=apollo,dc=test
+objectClass: organizationalUnit
+ou: groups
+
+dn: uid=admin.ops,ou=people,dc=apollo,dc=test
+objectClass: inetOrgPerson
+uid: admin.ops
+cn: Администратор платформы
+sn: Ops
+displayName: Администратор платформы
+userPassword: admin-pass
+
+dn: uid=noc.duty,ou=people,dc=apollo,dc=test
+objectClass: inetOrgPerson
+uid: noc.duty
+cn: Дежурный смены NOC
+sn: Duty
+displayName: Дежурный смены NOC
+userPassword: duty-pass
+
+dn: uid=eng.network,ou=people,dc=apollo,dc=test
+objectClass: inetOrgPerson
+uid: eng.network
+cn: Инженер сети
+sn: Network
+displayName: Инженер сети
+userPassword: eng-pass
+
+dn: uid=biz.owner,ou=people,dc=apollo,dc=test
+objectClass: inetOrgPerson
+uid: biz.owner
+cn: Владелец сервиса
+sn: Owner
+displayName: Владелец сервиса
+userPassword: viewer-pass
+
+dn: uid=no.groups,ou=people,dc=apollo,dc=test
+objectClass: inetOrgPerson
+uid: no.groups
+cn: Сотрудник без ролей
+sn: Nobody
+displayName: Сотрудник без ролей
+userPassword: nobody-pass
+
+dn: cn=platform-admins,ou=groups,dc=apollo,dc=test
+objectClass: groupOfNames
+cn: platform-admins
+member: uid=admin.ops,ou=people,dc=apollo,dc=test
+
+dn: cn=noc-engineers,ou=groups,dc=apollo,dc=test
+objectClass: groupOfNames
+cn: noc-engineers
+member: uid=noc.duty,ou=people,dc=apollo,dc=test
+member: uid=eng.network,ou=people,dc=apollo,dc=test
+
+dn: cn=service-owners,ou=groups,dc=apollo,dc=test
+objectClass: groupOfNames
+cn: service-owners
+member: uid=biz.owner,ou=people,dc=apollo,dc=test

@@ -1,0 +1,183 @@
+# Запуск из каталога deploy/: docker compose up -d
+# Переменные контейнеров берутся из ../.env (создать из ../.env.example).
+
+name: apollo
+
+services:
+  db:
+    image: postgres:16-alpine
+    env_file: ../.env
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # Порт БД наружу НЕ публикуется — доступ только из внутренней сети compose
+    networks: [internal]
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  backend:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.backend
+    env_file: ../.env
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [internal]
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=2).status==200 else 1)"
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  # Тот же образ, другая точка входа: приём не должен тормозить из-за
+  # обработки, а обработка — из-за приёма
+  normalizer:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.backend
+    command: ["python", "-m", "app.workers.normalizer"]
+    env_file: ../.env
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [internal]
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  router:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.backend
+    command: ["python", "-m", "app.workers.router"]
+    env_file: ../.env
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [internal]
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  delivery:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.backend
+    command: ["python", "-m", "app.workers.delivery"]
+    env_file: ../.env
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [internal]
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  # Сводки модели. Отдельный процесс: модель отвечает секунды, а путь
+  # «событие → инбокс» обязан укладываться в пять. Остановка воркера
+  # не влияет ни на приём, ни на доставку.
+  llm:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.backend
+    command: ["python", "-m", "app.workers.llm_summarizer"]
+    env_file: ../.env
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [internal]
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.frontend
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "80:8080"
+    networks: [internal]
+    read_only: true
+    # nginx-unprivileged пишет pid и временные файлы в /tmp
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+
+networks:
+  internal:
+
+volumes:
+  pgdata:

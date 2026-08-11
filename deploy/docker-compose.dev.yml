@@ -1,0 +1,64 @@
+# Оверлей для разработки. Применять явно:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+#
+# Здесь живут подстановки внешних систем, доступа к которым на стенде нет,
+# и публикация портов для локальных тестов. В продуктивную конфигурацию
+# этот файл не идёт.
+#
+# Порт БД нестандартный: 5432 на хосте может быть занят локальным PostgreSQL
+# или зарезервирован Windows (Hyper-V port exclusion range).
+
+services:
+  db:
+    ports:
+      - "127.0.0.1:55432:5432"
+
+  # Кнопки быстрого входа на экране авторизации: показать конвейер под двумя
+  # ролями за один клик, не диктуя пароли со сцены. Учётки задаются только
+  # здесь — продуктивная сборка идёт без этих аргументов, и кнопок в ней нет.
+  frontend:
+    build:
+      args:
+        NUXT_PUBLIC_DEMO_USER: "duty:Пароль-для-стенда-12"
+        NUXT_PUBLIC_DEMO_ADMIN: "admin:Пароль-для-стенда-12"
+
+  # Подстановка каталога: структура групп воспроизводит боевую AD.
+  # Тесты идут против него, а не против моков библиотеки — иначе проверялась
+  # бы наша фантазия о протоколе, а не работа с каталогом.
+  ldap:
+    image: osixia/openldap:1.5.0
+    command: ["--copy-service"]
+    environment:
+      LDAP_ORGANISATION: Apollo Test
+      LDAP_DOMAIN: apollo.test
+      LDAP_ADMIN_PASSWORD: ldap-admin-pass
+    volumes:
+      - ./ldap:/container/service/slapd/assets/config/bootstrap/ldif/custom:ro
+    ports:
+      - "127.0.0.1:1389:389"
+    networks: [internal]
+
+  # Подстановка TrueConf Server: те же пути, коды ответов и формат ошибок.
+  # Переключение на боевой сервер — смена TRUECONF_BASE_URL и реквизитов.
+  trueconf:
+    build:
+      context: ..
+      dockerfile: deploy/mocks/trueconf/Dockerfile
+    environment:
+      MOCK_CLIENT_ID: apollo
+      MOCK_CLIENT_SECRET: apollo-secret
+    ports:
+      - "127.0.0.1:18080:8080"
+    networks: [internal]
+
+  # Подстановка локальной модели, пока ВМ с Qwen не готова. Контракт тот же
+  # (OpenAI-совместимый), переключение — смена LLM_BASE_URL и LLM_MODEL.
+  llm-mock:
+    build:
+      context: ..
+      dockerfile: deploy/mocks/llm/Dockerfile
+    environment:
+      MOCK_MODEL: qwen2.5-7b-instruct
+    ports:
+      - "127.0.0.1:18081:8080"
+    networks: [internal]
