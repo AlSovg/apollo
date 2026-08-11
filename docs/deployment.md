@@ -31,10 +31,25 @@
 cp .env.example .env      # заполнить; для дева хватает значений по умолчанию
 cd deploy
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
-docker compose exec backend alembic upgrade head   # миграции — явный шаг
+
+# Схема и справочники: роли, источники, шкала критичности
+docker compose exec backend alembic upgrade head
+
+# Аварийный администратор — пароль печатается один раз
+docker compose exec backend python -m app.cli create-admin breakglass
+
+# Демо-данные: темы и соответствие групп тестового домена ролям
+docker compose exec backend python -m app.seed
+
 curl localhost/health           # живость
 curl localhost/health/ready     # готовность: реально проверяет БД
 ```
+
+Три шага после `up` обязательны: миграции создают схему, `create-admin` даёт
+единственный способ войти в свежую систему, `app.seed` — темы, без которых
+маршрутизатор не найдёт получателей и уведомления не появятся. `app.seed`
+идемпотентен, повторный запуск ничего не дублирует; `--reset` убирает прежние
+демо-данные, не трогая заведённое руками.
 
 Что даёт оверлей:
 
@@ -76,11 +91,23 @@ curl localhost/health/ready     # готовность: реально пров�
 получателя».
 
 Соответствие групп каталога ролям платформы живёт в таблице `role_mappings`
-(DN группы → код роли), синхронизация — кнопкой в админке «Пользователи»
-или по расписанию `LDAP_SYNC_INTERVAL_MINUTES`.
+(DN группы → код роли) — в каталоге его нет и быть не может: AD не знает про
+роли платформы. Пока таблица пуста, первый доменный вход создаёт пользователя
+**без ролей**, и в админку не попасть. Задаётся командой:
 
-Локальные учётки (`admin`, `duty`) заводятся разовым скриптом администратора —
-в коде и сидах их нет.
+```bash
+docker compose exec backend python -m app.cli map-role \
+  "CN=platform-admins,OU=apollo-groups,DC=apollo,DC=test" admin
+docker compose exec backend python -m app.cli list-role-mappings
+```
+
+Для тестового домена и OpenLDAP-мока эти связи уже входят в `app.seed`.
+Синхронизация ролей — кнопкой в админке «Пользователи» или по расписанию
+`LDAP_SYNC_INTERVAL_MINUTES`; роли обновляются и при каждом входе.
+
+Локальный администратор (`create-admin`) при работе с каталогом нужен именно
+как предохранитель: каталог живёт на отдельной машине, и если он недоступен,
+без локальной учётки в систему не войдёт никто.
 
 Пересборка после правок:
 
@@ -100,7 +127,14 @@ cd frontend && npm run types:api    # openapi-typescript → types/api.d.ts
 cp .env.example .env    # заполнить ВСЕ секреты — пустой секрет валит старт
 cd deploy
 docker compose up -d --build
+docker compose exec backend alembic upgrade head
+docker compose exec backend python -m app.cli create-admin breakglass
+# Роли доменных групп заказчика — по одной команде на группу:
+docker compose exec backend python -m app.cli map-role "<DN группы>" admin
 ```
+
+`app.seed` в проде не запускается: там свои темы и свои DN групп. Темы
+создаются на экране «Темы» под учёткой администратора.
 
 Отличия от дева — только отсутствием оверлея: нет моков, порт БД закрыт,
 кнопок демо-входа нет. Обязательные значения `.env` описаны в

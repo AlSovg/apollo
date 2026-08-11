@@ -58,7 +58,9 @@ POST /ingest/{source} ──► raw_events (append-only)
 cp .env.example .env        # заполнить секреты
 cd deploy
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
-docker compose exec backend alembic upgrade head
+docker compose exec backend alembic upgrade head              # схема и справочники
+docker compose exec backend python -m app.cli create-admin breakglass
+docker compose exec backend python -m app.seed                # темы и роли групп
 curl localhost/health       # 200 — живой
 ```
 
