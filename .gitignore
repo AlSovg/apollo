@@ -4,6 +4,10 @@
 *.ppk
 id_*
 !id_*.pub
+# CA домена — публичный сертификат, а не секрет. Нужен в репозитории:
+# dev-оверлей монтирует его в backend и delivery для валидации LDAPS,
+# без файла docker compose поднимет пустую директорию и вход по AD сломается
+!deploy/ad/ca.pem
 
 # Python
 __pycache__/

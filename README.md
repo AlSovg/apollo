@@ -73,6 +73,7 @@ dev-оверлея — [docs/deployment.md](docs/deployment.md).
 | `tz.md` | техническое задание: FR/NFR, контракт API, канонический формат |
 | `docs/deployment.md` | развёртывание dev и prod, эксплуатация |
 | `deploy/integrations/README.md` | подключение боевых Zabbix 7 и SolarWinds |
+| `docs/zabbix-integration.md` | как Zabbix встроен в код и что править |
 | `integration-runbook.md` | раннбук текущих работ по боевым источникам |
 | `docs/llm-setup.md` | языковая модель: контур, ограничения железа, замеры |
 | `docs/load-test-report.md` | отчёт о нагрузочном тестировании |
