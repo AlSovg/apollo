@@ -1,5 +1,6 @@
 """Служебные команды бэкенда.
 
+    python -m app.cli sync-tokens
     python -m app.cli issue-token zabbix [--with-hmac]
     python -m app.cli create-admin breakglass [--password ...]
     python -m app.cli map-role "CN=platform-admins,OU=...,DC=..." admin
@@ -12,6 +13,7 @@
 
 import argparse
 import asyncio
+import os
 import secrets
 import string
 import sys
@@ -26,6 +28,69 @@ from app.models.identity import Role, RoleMapping, User, UserRole
 from app.services.ingest import token_hash
 
 _PASSWORD_ALPHABET = string.ascii_letters + string.digits
+
+# Токен источника, объявленный в окружении: INGEST_TOKEN_ZABBIX и т.п.
+_TOKEN_ENV_PREFIX = "INGEST_TOKEN_"
+_HMAC_ENV_PREFIX = "INGEST_HMAC_"
+
+
+def _env_suffix(code: str) -> str:
+    """Код источника → хвост имени переменной: solar-winds → SOLAR_WINDS."""
+    return code.upper().replace("-", "_").replace(".", "_")
+
+
+async def _sync_tokens() -> int:
+    """Применить в реестр токены, объявленные в окружении.
+
+    Обратная сторона issue-token: там секрет генерируется и его переносят в
+    настройки источника руками, здесь он задан в .env заранее — и одно и то же
+    значение получают и реестр, и отправитель (боевой Zabbix, эмулятор стенда).
+    Ради этого команда и нужна: установка с нуля перестаёт требовать
+    копирования секрета между двумя местами.
+
+    Идемпотентна: повторный запуск с тем же .env ничего не меняет.
+    """
+    async with get_sessionmaker()() as session:
+        sources = (await session.execute(select(EventSource))).scalars().all()
+
+        applied: list[str] = []
+        skipped: list[str] = []
+        for source in sources:
+            token = os.environ.get(f"{_TOKEN_ENV_PREFIX}{_env_suffix(source.code)}", "").strip()
+            if not token:
+                skipped.append(source.code)
+                continue
+
+            secret_hex = os.environ.get(
+                f"{_HMAC_ENV_PREFIX}{_env_suffix(source.code)}", ""
+            ).strip()
+            try:
+                hmac_secret = bytes.fromhex(secret_hex) if secret_hex else None
+            except ValueError:
+                print(
+                    f"Источник '{source.code}': {_HMAC_ENV_PREFIX}"
+                    f"{_env_suffix(source.code)} не является hex-строкой",
+                    file=sys.stderr,
+                )
+                return 1
+
+            await session.execute(
+                update(EventSource)
+                .where(EventSource.code == source.code)
+                .values(token_hash=token_hash(token), hmac_secret=hmac_secret)
+            )
+            applied.append(source.code)
+
+        await session.commit()
+
+    # Печатаются только коды источников: сами токены в вывод не попадают
+    print(f"Токен применён: {', '.join(applied) if applied else '—'}")
+    if skipped:
+        print(
+            f"Переменная не задана, токен не тронут: {', '.join(skipped)}",
+            file=sys.stderr,
+        )
+    return 0
 
 
 async def _issue_token(code: str, with_hmac: bool) -> int:
@@ -176,6 +241,10 @@ async def _main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="app.cli")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    subparsers.add_parser(
+        "sync-tokens", help="Применить токены источников из окружения (INGEST_TOKEN_*)"
+    )
+
     issue = subparsers.add_parser("issue-token", help="Выдать токен источнику")
     issue.add_argument("code", help="Код источника из event_sources")
     issue.add_argument(
@@ -201,6 +270,8 @@ async def _main(argv: list[str]) -> int:
 
     args = parser.parse_args(argv)
     try:
+        if args.command == "sync-tokens":
+            return await _sync_tokens()
         if args.command == "issue-token":
             return await _issue_token(args.code, args.with_hmac)
         if args.command == "create-admin":

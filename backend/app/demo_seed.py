@@ -47,7 +47,10 @@ from sqlalchemy import CursorResult, delete, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.adapters.identity import hash_password
+from app.adapters.identity import hash_password, ldap_settings
+from app.adapters.identity.base import DirectoryUnavailableError
+from app.adapters.identity.ldap import LdapIdentityProvider
+from app.config import get_settings
 from app.db import get_engine, get_sessionmaker
 from app.models.events import Incident, RawEvent
 from app.models.identity import User, UserContact, UserRole
@@ -56,6 +59,7 @@ from app.seed import _seed as seed_topics_and_roles
 from app.services.normalizer import process_batch
 from app.services.partitions import ensure_partitions
 from app.services.router import route_batch
+from app.services.users import map_groups_to_roles, sync_roles, upsert_user
 
 _PASSWORD_ALPHABET = string.ascii_letters + string.digits
 _MOSCOW = ZoneInfo("Europe/Moscow")
@@ -113,6 +117,41 @@ DEMO_USERS: list[DemoUser] = [
         # владелец сервиса подписан узко — только своя группа объектов
         subscriptions={"web-prod": ["web"]},
     ),
+]
+
+
+@dataclass(frozen=True)
+class DirectoryUser:
+    """Доменная учётка, которой стенд назначает подписку заранее.
+
+    При AUTH_PROVIDER=ldap каналы email и TrueConf работают только у доменных
+    учёток: адрес доставки резолвится из каталога, а локальных демо-
+    пользователей там нет. Обязательные подписки по роли идут в web, поэтому
+    без строки в subscriptions доставка в TrueConf на чистом стенде молчит,
+    пока кто-нибудь не подпишется руками.
+
+    Происхождение — assigned: так это и выглядит в бою, когда администратор
+    назначает канал сотруднику. Отписаться пользователь не может, но каналы
+    поменять — да.
+    """
+
+    username: str
+    # код темы → каналы доставки
+    subscriptions: dict[str, list[str]]
+
+
+# Логины совпадают с deploy/ad/bootstrap-users.sh. Каждой учётке там
+# проставлен свой TrueConf ID (ipPhone) и почта, поэтому сообщения разных
+# дежурных приходят в разные чаты, а не в один общий.
+DIRECTORY_USERS: list[DirectoryUser] = [
+    # Дежурный: критичное с тегами sla+prod — в TrueConf
+    DirectoryUser("ad.duty", {"sla-watch": ["web", "trueconf"]}),
+    # Второй инженер: сетевой контур, тоже TrueConf — видно, что канал
+    # работает не на одном избранном пользователе
+    DirectoryUser("ad.eng", {"network-core": ["web", "trueconf"]}),
+    # Наблюдатель: почта. Адрес резолвится из каталога; уйдёт ли письмо,
+    # зависит от SMTP_HOST, и это видно на дашборде доставки
+    DirectoryUser("ad.viewer", {"web-prod": ["web", "email"]}),
 ]
 
 
@@ -530,6 +569,87 @@ async def _seed_subscriptions(session: AsyncSession) -> int:
     return created
 
 
+async def _seed_directory_subscriptions(session: AsyncSession) -> tuple[int, str]:
+    """Назначенные подписки доменных учёток. Возвращает (сколько, пояснение).
+
+    Ветка целиком про AUTH_PROVIDER=ldap: при локальном входе доменных учёток
+    нет и назначать нечего. Пользователь заводится здесь же, если он ещё ни
+    разу не входил, — иначе назначать подписку было бы некому: запись в
+    платформе создаёт вход, а стенд готовится раньше.
+    """
+    settings = get_settings()
+    if settings.auth_provider != "ldap":
+        return 0, "AUTH_PROVIDER=local — доменных подписок не требуется"
+
+    # Назначенной подписке нужен тот, кто её назначил (subscriptions_granted_chk)
+    granted_by = (
+        await session.execute(
+            select(User.id)
+            .join(UserRole, UserRole.user_id == User.id)
+            .where(UserRole.role_code == "admin", User.is_active)
+            .order_by(User.id)
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if granted_by is None:
+        return 0, "нет ни одного администратора — сначала `app.cli create-admin`"
+
+    provider = LdapIdentityProvider(ldap_settings(settings))
+    topic_ids: dict[str, int] = {
+        row.code: row.id
+        for row in (await session.execute(select(Topic.code, Topic.id))).all()
+    }
+
+    created = 0
+    missing: list[str] = []
+    for directory_user in DIRECTORY_USERS:
+        user = (
+            await session.execute(
+                select(User).where(
+                    User.username == directory_user.username, User.provider == "ldap"
+                )
+            )
+        ).scalar_one_or_none()
+
+        if user is None:
+            try:
+                subject = await provider.describe_by_username(directory_user.username)
+            except DirectoryUnavailableError:
+                return created, "каталог недоступен — доменные подписки пропущены"
+            if subject is None:
+                missing.append(directory_user.username)
+                continue
+            user = await upsert_user(session, subject, "ldap")
+            # Роли приезжают из групп каталога — тем же путём, что и при входе
+            await sync_roles(session, user, await map_groups_to_roles(session, subject.roles))
+
+        for topic_code, channels in directory_user.subscriptions.items():
+            topic_id = topic_ids.get(topic_code)
+            if topic_id is None:
+                print(f"  внимание: темы '{topic_code}' нет, подписка пропущена")
+                continue
+            inserted = (
+                await session.execute(
+                    insert(Subscription)
+                    .values(
+                        user_id=user.id,
+                        topic_id=topic_id,
+                        origin="assigned",
+                        channels=channels,
+                        granted_by=granted_by,
+                    )
+                    .on_conflict_do_nothing(constraint="subscriptions_uq")
+                    .returning(Subscription.id)
+                )
+            ).scalar_one_or_none()
+            if inserted is not None:
+                created += 1
+
+    await session.flush()
+    note = f"нет в каталоге: {', '.join(missing)}" if missing else "каталог: все учётки найдены"
+    return created, note
+
+
 _DEMO_EXTERNAL_KEYS: dict[str, list[str]] = {
     "zabbix": [f"demo-{number}" for number in range(901, 909)],
     "solarwinds": [
@@ -596,6 +716,7 @@ async def _main(argv: list[str]) -> int:
             await seed_topics_and_roles(session)
             printed_users = await _seed_users(session, args.password)
             subscriptions = await _seed_subscriptions(session)
+            assigned, directory_note = await _seed_directory_subscriptions(session)
             await session.commit()
 
             inserted = await _insert_raw_events(session)
@@ -610,6 +731,7 @@ async def _main(argv: list[str]) -> int:
         await get_engine().dispose()
 
     print(f"Новых raw_events: {inserted}, добровольных подписок: {subscriptions}")
+    print(f"Назначенных подписок доменным учёткам: {assigned} ({directory_note})")
     print(f"Обработано нормализатором: {normalized.processed}, ошибок: {normalized.failed}")
     print(f"Инцидентов смаршрутизировано: {routed.size}, уведомлений создано: {routed.created}")
     if printed_users:

@@ -80,3 +80,31 @@ services:
     ports:
       - "127.0.0.1:18081:8080"
     networks: [internal]
+
+  # Эмулятор ВМ №1 и №2 (Zabbix, SolarWinds). На стендовых машинах по замыслу
+  # стоит генератор событий (AGENTS.md §3) — здесь он в контейнере, потому что
+  # SSH ни на одну из ВМ не проходит (integration-runbook.md §4). Шлёт те же
+  # вебхуки, что боевые системы: переключение на настоящий источник = docker
+  # compose stop simulator.
+  #
+  # Профиль demo: обычный `up` его НЕ поднимает, нужен явный флаг —
+  #   docker compose -f docker-compose.yml -f docker-compose.dev.yml \
+  #     --profile demo up -d simulator
+  #
+  # Токены выдаются в реестре источников и кладутся в ../.env:
+  #   docker compose exec backend python -m app.cli issue-token zabbix
+  #   docker compose exec backend python -m app.cli issue-token solarwinds
+  simulator:
+    profiles: [demo]
+    build:
+      context: ..
+      dockerfile: deploy/mocks/sources/Dockerfile
+    env_file: ../.env
+    environment:
+      SIM_TARGET_URL: http://backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:18082:8080"
+    networks: [internal]

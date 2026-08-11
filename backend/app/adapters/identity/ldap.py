@@ -238,6 +238,40 @@ class LdapIdentityProvider(IdentityProvider):
             display_name=str(display_name.value) if display_name else None,
         )
 
+    def _lookup_by_username(self, username: str) -> tuple[Any | None, list[str]]:
+        settings = self._settings
+        with self._service_connection() as conn:
+            entry = self._find_entry(
+                conn,
+                f"({settings.username_attribute}={escape_filter_chars(username)})",
+            )
+            if entry is None:
+                return None, []
+            return entry, self._groups_of(conn, entry)
+
+    async def describe_by_username(self, username: str) -> Subject | None:
+        """Субъект по логину, без проверки пароля.
+
+        Нужно там, где учётку заводят до её первого входа: обычно запись в
+        платформе появляется при логине, но подготовка стенда идёт раньше,
+        чем кто-либо успевает войти. Служебного bind для этого достаточно —
+        пароль пользователя не запрашивается и никуда не попадает.
+        """
+        try:
+            entry, groups = await asyncio.to_thread(self._lookup_by_username, username)
+        except LDAPException as exc:
+            raise DirectoryUnavailableError(f"каталог недоступен: {type(exc).__name__}") from exc
+        if entry is None:
+            return None
+
+        display_name = getattr(entry, "displayName", None) or getattr(entry, "cn", None)
+        return Subject(
+            subject_id=self._subject_id_of(entry),
+            username=username,
+            roles=groups,
+            display_name=str(display_name.value) if display_name else None,
+        )
+
     async def is_active(self, subject_id: str) -> bool:
         """Учётка отсутствует или отключена в каталоге → доступ закрывается."""
         try:

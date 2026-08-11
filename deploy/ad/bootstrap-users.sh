@@ -28,11 +28,14 @@ add_user() { # логин, имя, фамилия, почта
         --mail-address="$4"
 }
 
-add_user ad.admin  "Администратор" "Платформы"  "ad.admin@apollo.test"
-add_user ad.duty   "Дежурный"      "Смены"      "ad.duty@apollo.test"
-add_user ad.eng    "Инженер"       "Сети"       "ad.eng@apollo.test"
-add_user ad.viewer "Владелец"      "Сервиса"    "ad.viewer@apollo.test"
-add_user ad.nobody "Сотрудник"     "Без ролей"  "ad.nobody@apollo.test"
+# Почта — адреса тестовых учёток TrueConf Server (см. trueconf_checkup.md §7):
+# один и тот же человек в каталоге, в TrueConf и в почте. Домен apollo.test
+# почтой не обслуживается, t4hack.local — это то, что реально заведено на стенде.
+add_user ad.admin  "Администратор" "Платформы"  "user1@t4hack.local"
+add_user ad.duty   "Дежурный"      "Смены"      "user2@t4hack.local"
+add_user ad.eng    "Инженер"       "Сети"       "user3@t4hack.local"
+add_user ad.viewer "Владелец"      "Сервиса"    "user4@t4hack.local"
+add_user ad.nobody "Сотрудник"     "Без ролей"  "user5@t4hack.local"
 
 samba-tool group addmembers platform-admins ad.admin
 samba-tool group addmembers noc-engineers   ad.duty,ad.eng
@@ -58,7 +61,14 @@ ipPhone: $2
 LDIF
 }
 
-set_ipphone ad.duty user2
-set_ipphone ad.eng  user3
+# Короткая форма без домена: адаптер канала объясняет, почему не email
+# (backend/app/adapters/channels/trueconf.py, шапка модуля). Каждой учётке
+# каталога соответствует свой тестовый аккаунт TrueConf — сообщения разных
+# дежурных приходят в разные чаты, а не в один общий.
+set_ipphone ad.admin  user1
+set_ipphone ad.duty   user2
+set_ipphone ad.eng    user3
+set_ipphone ad.viewer user4
+set_ipphone ad.nobody user5
 
 echo "[ad] готово: 5 пользователей, 3 группы"

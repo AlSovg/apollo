@@ -55,10 +55,11 @@ POST /ingest/{source} ──► raw_events (append-only)
 ## Быстрый старт
 
 ```bash
-cp .env.example .env        # заполнить секреты
+cp .env.example .env        # заполнить секреты, включая INGEST_TOKEN_*
 cd deploy
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 docker compose exec backend alembic upgrade head              # схема и справочники
+docker compose exec backend python -m app.cli sync-tokens     # токены источников из .env
 docker compose exec backend python -m app.cli create-admin breakglass --password 'Demo-stand-2026'
 docker compose exec backend python -m app.seed                # каталог тем и роли групп
 docker compose exec backend python -m app.demo_seed --password 'Demo-stand-2026'
@@ -96,6 +97,60 @@ LLM работают без единого внешнего адреса. Иск
 Подробности, продовый контур и отличия dev-оверлея —
 [docs/deployment.md](docs/deployment.md).
 
+## Эмулятор источников
+
+Доступа к ВМ Zabbix и SolarWinds по SSH сейчас нет (`integration-runbook.md`
+§4), поэтому «генератор событий», который по архитектуре стоит на ВМ №1 и №2
+(`AGENTS.md` §3), вынесен в контейнер `simulator`. Он шлёт те же вебхуки на
+`POST /api/v1/ingest/{source}`, что и боевые системы: те же поля, форматы
+времени и заголовки аутентификации. Переключение на настоящий источник —
+остановить сервис, код платформы при этом не меняется.
+
+Токен берётся из `INGEST_TOKEN_ZABBIX` / `INGEST_TOKEN_SOLARWINDS` — тех же
+переменных, что применяет `app.cli sync-tokens` в реестр источников. Отдельной
+настройки эмулятору не нужно, достаточно поднять его с профилем `demo`:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml \
+  --profile demo up -d simulator
+```
+
+Профиль `demo` означает, что обычный `up` эмулятор не поднимает.
+
+Работает в двух режимах одновременно. **Поток** — раз в `SIM_INTERVAL_S`
+(25 секунд по умолчанию, ~2-3 события в минуту) открывает новую проблему,
+повторяет открытую или закрывает её; стенд выглядит живым, инбокс за час
+показа не заплывает. **Сценарии** — готовый сюжет целиком по HTTP:
+
+```bash
+curl localhost:18082/scenarios              # список с пояснениями
+curl -X POST localhost:18082/scenario/scada-down
+curl localhost:18082/state                  # отправлено, принято, открытые проблемы
+curl -X POST localhost:18082/pause          # /resume — вернуть поток
+```
+
+| Сценарий | Что показывает |
+|---|---|
+| `scada-down` | АСУ ТП Приобье: узел недоступен + перегрев соседнего → темы `scada-asu`, `critical-any` |
+| `network-msk` | Магистраль Москва: узел лёг, на соседнем потери пакетов → тема `network-core` |
+| `db-replication` | БД prod: остановлена репликация, теги `sla`+`prod` → `prod-db`, `sla-watch`, `critical-any` |
+| `web-degradation` | Веб prod: рост отклика на сервере и балансировщике → тема `web-prod` ловит оба источника |
+| `noise` | Пять событий уровня Information со stage — шум, который темы обязаны отсечь |
+| `storm` | 50 событий подряд, большинство повторы — дедупликация в работе |
+| `resolve-all` | Закрыть все проблемы, открытые эмулятором |
+
+Парк объектов Zabbix тот же, что у `app.demo_seed` (`gpn-scada-07`,
+`gpn-db-prod-02` и далее), поэтому события ложатся в уже существующие темы и
+не плодят вторую инфраструктуру на дашборде. Узлы SolarWinds поток и сценарии
+берут из пула площадок (`gpn-net-msk-07`, `gpn-net-nsk-23`, …): ключ
+дедупликации там — пара «узел + алерт», и на шести постоянных именах источник
+после первого прогона перестал бы порождать уведомления вообще. События идут
+как боевые — попадают в инциденты, порождают уведомления и доходят до инбокса
+и TrueConf.
+
+Нагрузочный прогон — это по-прежнему `tools/load_generator.py`: там залп,
+перцентили и отчёт, здесь ровный фон и управляемый показ.
+
 ## Учётные записи стенда
 
 > Всё ниже — реквизиты разборного демонстрационного стенда, поднятого под
@@ -125,13 +180,34 @@ Samba AD DC (контейнер `apollo-ad`, домен `apollo.test`). Учёт
 платформе сами при первом входе, роли приезжают из групп каталога через
 сопоставления из `app.seed`. Пароль у всех пятерых общий — `aQI73TgceNCQmICE`.
 
-| Логин | Группа AD | Роль | Что показывает |
-|---|---|---|---|
-| `ad.admin` | platform-admins | admin | админка под доменной учёткой |
-| `ad.duty` | noc-engineers | engineer | инбокс, роль получена из группы AD |
-| `ad.eng` | noc-engineers | engineer | второй инженер той же группы |
-| `ad.viewer` | service-owners | viewer | наблюдатель |
-| `ad.nobody` | — | без ролей | вход есть, доступа к данным нет — проверка RBAC |
+| Логин | Группа AD | Роль | TrueConf / email | Что показывает |
+|---|---|---|---|---|
+| `ad.admin` | platform-admins | admin | `user1` | админка под доменной учёткой |
+| `ad.duty` | noc-engineers | engineer | `user2` | инбокс + доставка в TrueConf (подписка `sla-watch`) |
+| `ad.eng` | noc-engineers | engineer | `user3` | второй инженер: TrueConf по теме `network-core` |
+| `ad.viewer` | service-owners | viewer | `user4` | наблюдатель + канал email по теме `web-prod` |
+| `ad.nobody` | — | без ролей | `user5` | вход есть, доступа к данным нет — проверка RBAC |
+
+Адреса доставки живут в каталоге и резолвятся в момент отправки: TrueConf ID
+в атрибуте `ipPhone`, почта в `mail`. Обе колонки указывают на тестовые учётки
+TrueConf Server (`trueconf_checkup.md` §7), так что сообщения разных дежурных
+приходят в разные чаты. Заводится это в `deploy/ad/bootstrap-users.sh`.
+
+Подписки с каналами TrueConf и email заводит `app.demo_seed`: при
+`AUTH_PROVIDER=ldap` он находит учётки в каталоге (заводя их в платформе, если
+те ещё ни разу не входили) и назначает подписки с `origin=assigned` — так же,
+как это делал бы администратор. Обязательные подписки по роли всегда идут
+каналом `web`, поэтому без этого шага TrueConf на чистом стенде молчал бы.
+
+**Каналы кроме `web` работают только у доменных учёток.** При
+`AUTH_PROVIDER=ldap` адреса берутся из каталога, а локальных демо-пользователей
+(`duty.engineer`, `shift.lead`) в каталоге нет — их уведомления в TrueConf и на
+почту честно падают с «не удалось определить адрес получателя». Показывать
+доставку нужно под `ad.duty` / `ad.eng`.
+
+**Подписка действует на будущие инциденты.** Маршрутизатор берёт инцидент один
+раз (`last_notified_at IS NULL`), поэтому по уже открытым инцидентам новая
+подписка уведомлений не получит — сначала подписка, потом события.
 
 Администратор домена — `Administrator` / `Hk8WsDoyYq1qEEHNOdKO` (он же
 `LDAP_BIND_PASSWORD`). Сменить пароль доменной учётки:
