@@ -65,6 +65,8 @@ async def check_directory(settings: Settings) -> IntegrationHealth:
 
 
 async def check_llm(settings: Settings) -> IntegrationHealth:
+    if settings.llm_provider == "template":
+        return IntegrationHealth("Языковая модель", OK, "шаблонные сводки")
     if not settings.llm_base_url:
         return IntegrationHealth("Языковая модель", NOT_CONFIGURED)
     try:

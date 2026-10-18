@@ -6,6 +6,7 @@
 """
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -82,6 +83,9 @@ class Settings(BaseSettings):
     smtp_use_tls: bool = True
 
     # --- Языковая модель (ВМ №4, OpenAI-совместимый endpoint) ---
+    # openai — OpenAI-совместимый endpoint; template — детерминированная
+    # шаблонная сводка без модели (стенд без ВМ с GPU)
+    llm_provider: Literal["openai", "template"] = "openai"
     llm_base_url: str = ""
     llm_model: str = "qwen3-14b"
     llm_api_key: str = ""

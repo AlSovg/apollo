@@ -10,10 +10,13 @@ from app.adapters.llm.base import (
 )
 from app.adapters.llm.masking import Masker
 from app.adapters.llm.openai_compatible import LlmSettings, OpenAiCompatibleClient
+from app.adapters.llm.template import TemplateSummarizer
 from app.config import Settings
 
 
-def build_llm_client(settings: Settings) -> OpenAiCompatibleClient:
+def build_llm_client(settings: Settings) -> LlmClient:
+    if settings.llm_provider == "template":
+        return TemplateSummarizer()
     return OpenAiCompatibleClient(
         LlmSettings(
             base_url=settings.llm_base_url,
@@ -37,5 +40,6 @@ __all__ = [
     "LlmUnavailableError",
     "Masker",
     "OpenAiCompatibleClient",
+    "TemplateSummarizer",
     "build_llm_client",
 ]
