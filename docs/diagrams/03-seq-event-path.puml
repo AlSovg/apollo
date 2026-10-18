@@ -1,0 +1,53 @@
+@startuml 03-seq-event-path
+!include gost.iuml
+hide footbox
+autonumber
+
+participant "Источник" as S
+participant "nginx" as N
+participant "backend" as B
+database "PostgreSQL" as DB
+participant "normalizer" as W
+participant "router" as R
+participant "llm" as L
+participant "delivery" as D
+participant "SMTP /\nинбокс" as M
+
+S -> N : POST /api/v1/ingest/zabbix
+N -> B : запрос на одну из реплик
+B -> B : токен источника, HMAC,\nлимит частоты
+B -> DB : INSERT raw_events
+B --> S : 202 Accepted
+
+loop опрос очереди
+  W -> DB : SELECT … FOR UPDATE SKIP LOCKED
+  W -> W : адаптер → канонический вид,\nкритичность, отпечаток
+  W -> DB : upsert monitored_objects,\nincidents, incident_events
+end
+
+R -> DB : SELECT инциденты … SKIP LOCKED
+R -> DB : темы по match_rule →\nэффективные подписчики
+R -> DB : INSERT notifications (pending)
+
+loop опрос очереди
+  L -> DB : SELECT инциденты без сводки … SKIP LOCKED
+  L -> L : языковая модель →\nчеловекочитаемая сводка
+  L -> DB : INSERT llm_summaries
+end
+
+D -> DB : SELECT notifications … SKIP LOCKED
+D -> DB : сводка инцидента из llm_summaries
+alt сводка готова
+  D -> D : текст = сводка
+else 15 с ожидания прошли, сводки нет
+  D -> D : текст = исходное сообщение инцидента
+end
+D -> M : доставка по каналу
+alt успех
+  D -> DB : status = sent
+else временная ошибка
+  D -> DB : next_retry_at через 1, 5, 30 мин
+else адреса нет или исчерпаны попытки
+  D -> DB : status = failed
+end
+@enduml

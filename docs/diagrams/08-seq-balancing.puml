@@ -1,0 +1,31 @@
+@startuml 08-seq-balancing
+' Балансировка через Docker DNS и повтор на соседней реплике (ADR-0003).
+!include gost.iuml
+hide footbox
+autonumber
+
+participant "Клиент" as C
+participant "nginx" as N
+participant "Docker DNS" as D
+participant "backend-1" as B1
+participant "backend-2" as B2
+
+C -> N : GET /api/v1/incidents
+N -> D : backend?
+D --> N : адреса B1 и B2
+N -> B1 : запрос
+B1 --> N : 200
+N --> C : 200, X-Upstream-Addr: B1
+
+C -> N : GET /api/v1/incidents
+N -> B2 : запрос (резолвер ротирует адреса)
+B2 --> N : 200
+N --> C : 200, X-Upstream-Addr: B2
+
+note over B1 : реплика упала
+C -> N : GET /api/v1/incidents
+N ->x B1 : соединение не установлено
+N -> B2 : proxy_next_upstream
+B2 --> N : 200
+N --> C : 200, X-Upstream-Addr: B2
+@enduml

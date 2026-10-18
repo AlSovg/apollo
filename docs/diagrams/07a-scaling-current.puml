@@ -1,0 +1,24 @@
+@startuml 07a-scaling-current
+' Масштабирование сейчас: реплики на одном хосте, очередь — таблицы PostgreSQL (ADR-0001).
+!include gost.iuml
+
+node "Хост" <<device>> {
+  node "Docker Compose" <<execution environment>> {
+    node "nginx" <<container>> as nginx
+    node "backend-1" <<container>> as b1
+    node "backend-2" <<container>> as b2
+    node "normalizer-1" <<container>> as n1
+    node "normalizer-2" <<container>> as n2
+    node "delivery" <<container>> as d1
+    database "PostgreSQL" as pg
+  }
+}
+
+nginx --> b1 : распределение\nпо DNS
+nginx --> b2
+b1 --> pg
+b2 --> pg
+n1 --> pg : SKIP LOCKED
+n2 --> pg : SKIP LOCKED
+d1 --> pg : SKIP LOCKED
+@enduml

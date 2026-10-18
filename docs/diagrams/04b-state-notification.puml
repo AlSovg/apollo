@@ -1,0 +1,13 @@
+@startuml 04b-state-notification
+!include gost.iuml
+left to right direction
+
+[*] --> pending : router создал\nуведомление
+pending --> sent : доставлено
+pending --> pending : временная ошибка /\nповтор через 1, 5, 30 мин
+pending --> failed : нет адреса или\nпопытки исчерпаны
+pending --> skipped : подписка заглушена
+sent --> [*]
+failed --> [*]
+skipped --> [*]
+@enduml

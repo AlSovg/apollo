@@ -1,0 +1,12 @@
+@startuml 04a-state-incident
+!include gost.iuml
+left to right direction
+
+[*] --> open : первое событие\nс новым отпечатком
+open --> open : повтор события /\ndedup_count += 1
+open --> resolved : событие resolved
+resolved --> [*]
+
+open : инцидент активен
+resolved : проблема устранена
+@enduml

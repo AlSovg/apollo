@@ -1,0 +1,55 @@
+@startuml 01-use-cases
+!include gost.iuml
+left to right direction
+
+actor "Система\nмониторинга" as src
+actor "Пользователь" as usr
+actor "Дежурный\nинженер" as eng
+actor "Владелец\nсервиса" as own
+actor "Администратор" as adm
+eng --|> usr
+own --|> usr
+adm --|> usr
+
+actor "Каталог\nLDAP / AD" as dir <<система>>
+actor "Почтовый\nсервер SMTP" as smtp <<система>>
+actor "TrueConf" as tc <<система>>
+actor "Языковая\nмодель" as llm <<система>>
+
+rectangle "Apollo" {
+  usecase "Передать событие\n(webhook)" as UC_ingest
+  usecase "Сформировать\nсводку инцидента" as UC_sum
+  usecase "Получить\nуведомление" as UC_notify
+  usecase "Войти в систему" as UC_login
+  usecase "Просмотреть\nинбокс" as UC_inbox
+  usecase "Просмотреть\nкарточку инцидента" as UC_card
+  usecase "Квитировать\nинцидент" as UC_ack
+  usecase "Управлять\nподписками" as UC_subs
+  usecase "Просмотреть\nдашборд" as UC_dash
+  usecase "Управлять темами" as UC_topics
+  usecase "Управлять\nисточниками" as UC_sources
+  usecase "Назначать роли" as UC_roles
+  usecase "Просмотреть\nжурнал аудита" as UC_audit
+}
+
+src --> UC_ingest
+UC_ingest ..> UC_sum : <<include>>
+UC_ingest ..> UC_notify : <<include>>
+UC_sum --> llm
+
+usr --> UC_login
+usr --> UC_inbox
+usr --> UC_card
+usr --> UC_ack
+usr --> UC_subs
+usr --> UC_dash
+usr --> UC_notify
+UC_login --> dir
+UC_notify --> smtp
+UC_notify --> tc
+
+adm --> UC_topics
+adm --> UC_sources
+adm --> UC_roles
+adm --> UC_audit
+@enduml

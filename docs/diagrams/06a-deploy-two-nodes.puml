@@ -1,0 +1,37 @@
+@startuml 06a-deploy-two-nodes
+' Публичный стенд: два узла (ADR-0006, docs/topology.md).
+!include gost.iuml
+left to right direction
+
+node "АРМ проверяющего" <<device>> as pc {
+  artifact "Браузер" as browser
+}
+node "Системы мониторинга\n(Zabbix, SolarWinds)" <<device>> as srcnode
+
+node "Узел app\n(VPS, публичный адрес)" <<device>> as vps {
+  node "Docker Compose" <<execution environment>> {
+    node "frontend\nnginx :8080 → :80" <<container>> as fe
+    node "backend × 2\nFastAPI :8000" <<container>> as be
+    node "normalizer × 2" <<container>> as nm
+    node "router" <<container>> as rt
+    node "delivery" <<container>> as dl
+    node "llm" <<container>> as lm
+    node "simulator\n(профиль demo)" <<container>> as sim #line.dashed
+  }
+}
+
+node "Узел db\n(домашний ПК, без публичного адреса)" <<device>> as home {
+  database "PostgreSQL 16\n:5432, только адрес оверлея" as db
+}
+
+browser --> fe : HTTPS :443 / HTTP :80
+srcnode --> fe : HTTP\nPOST /api/v1/ingest/{source}
+fe --> be : HTTP :8000\nDocker DNS
+sim --> be : вебхуки,\nсеть internal
+
+be -[bold]-> db : PostgreSQL :5432\nоверлей, scram-sha-256
+nm -[bold]-> db
+rt -[bold]-> db
+dl -[bold]-> db
+lm -[bold]-> db
+@enduml

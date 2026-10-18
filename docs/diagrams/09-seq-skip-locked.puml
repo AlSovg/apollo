@@ -1,0 +1,26 @@
+@startuml 09-seq-skip-locked
+' Раздел очереди между воркерами без координатора: FOR UPDATE SKIP LOCKED.
+!include gost.iuml
+hide footbox
+autonumber
+
+participant "normalizer-1" as A
+participant "normalizer-2" as B
+database "raw_events" as Q
+
+par воркер 1
+  A -> Q : SELECT … LIMIT 100\nFOR UPDATE SKIP LOCKED
+  Q --> A : строки 1–100
+else воркер 2
+  B -> Q : SELECT … LIMIT 100\nFOR UPDATE SKIP LOCKED
+  note right of Q : строки 1–100 заблокированы,\nпропускаются
+  Q --> B : строки 101–200
+end
+
+A -> A : обработка пачки
+B -> B : обработка пачки
+A -> Q : COMMIT, строки отмечены\nобработанными
+note over B : воркер 2 упал до COMMIT
+B ->x Q : откат транзакции
+note right of Q : строки 101–200 снова\nдоступны любому воркеру
+@enduml

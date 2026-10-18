@@ -1,0 +1,124 @@
+@startuml 05b-er-users
+' Модель данных, часть 2: пользователи, роли, темы, подписки. Источник истины — db/schema.sql.
+!include gost.iuml
+hide circle
+hide empty methods
+skinparam linetype ortho
+
+entity "users" as users {
+  * id : bigint <<PK>>
+  --
+  * subject_id : text
+  * provider : text
+  * username : text
+  password_hash : text
+  * is_active : boolean
+  * failed_logins : smallint
+  locked_until : timestamptz
+  roles_synced_at : timestamptz
+  * created_at : timestamptz
+  last_login_at : timestamptz
+}
+
+entity "user_contacts" as user_contacts {
+  * user_id : bigint <<PK, FK>>
+  * channel : text <<PK>>
+  --
+  * address : text
+  * verified : boolean
+  * created_at : timestamptz
+}
+
+entity "sessions" as sessions {
+  * id : bigint <<PK>>
+  --
+  * user_id : bigint <<FK>>
+  * jti : text
+  * issued_at : timestamptz
+  * expires_at : timestamptz
+  revoked_at : timestamptz
+  replaced_by : text
+}
+
+entity "roles" as roles {
+  * code : text <<PK>>
+  --
+  * name : text
+  description : text
+  * is_system : boolean
+}
+
+entity "user_roles" as user_roles {
+  * user_id : bigint <<PK, FK>>
+  * role_code : text <<PK, FK>>
+  --
+  * source : text
+  * synced_at : timestamptz
+}
+
+entity "role_mappings" as role_mappings {
+  * id : bigint <<PK>>
+  --
+  * external_group : text
+  * role_code : text <<FK>>
+  * created_at : timestamptz
+}
+
+entity "topics" as topics {
+  * id : bigint <<PK>>
+  --
+  * code : text
+  * name : text
+  description : text
+  * match_rule : jsonb
+  * is_active : boolean
+  created_by : bigint <<FK>>
+  * created_at : timestamptz
+  * updated_at : timestamptz
+}
+
+entity "topic_roles" as topic_roles {
+  * topic_id : bigint <<PK, FK>>
+  * role_code : text <<PK, FK>>
+  --
+  * created_at : timestamptz
+}
+
+entity "subscriptions" as subscriptions {
+  * id : bigint <<PK>>
+  --
+  * user_id : bigint <<FK>>
+  * topic_id : bigint <<FK>>
+  * origin : text
+  * channels : text[]
+  granted_by : bigint <<FK>>
+  muted_until : timestamptz
+  * created_at : timestamptz
+}
+
+entity "audit_log" as audit_log {
+  * id : bigint <<PK>>
+  --
+  actor_id : bigint <<FK>>
+  * action : text
+  * entity_type : text
+  entity_id : text
+  old_value : jsonb
+  new_value : jsonb
+  request_id : text
+  * created_at : timestamptz
+}
+
+users ||--o{ user_contacts
+users ||--o{ sessions
+users ||--o{ user_roles
+roles ||--o{ user_roles
+roles ||--o{ role_mappings
+topics ||--o{ topic_roles
+roles ||--o{ topic_roles
+users ||--o{ subscriptions
+topics ||--o{ subscriptions
+users |o--o{ subscriptions : granted_by
+users |o--o{ topics : created_by
+users |o--o{ audit_log : actor_id
+@enduml

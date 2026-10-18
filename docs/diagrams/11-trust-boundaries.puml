@@ -1,0 +1,33 @@
+@startuml 11-trust-boundaries
+' Границы доверия: зоны и меры защиты на каждой.
+!include gost.iuml
+left to right direction
+
+rectangle "Недоверенная зона" {
+  node "Источники событий\n—\nтокен на источник,\nопциональная HMAC" <<device>> as src
+  node "Браузер\n—\nJWT в httpOnly cookie" <<device>> as br
+}
+
+rectangle "Периметр" {
+  node "nginx\n—\nCSP, лимит тела 2 МБ,\nзаголовки безопасности" <<container>> as nginx
+}
+
+rectangle "Внутренняя сеть" {
+  node "backend\n—\nлимит частоты,\nRBAC по ролям,\nPydantic extra=forbid" <<container>> as be
+  node "воркеры" <<container>> as wk
+  database "PostgreSQL\n—\nпорт не публикуется" as db
+}
+
+rectangle "Внешние системы" {
+  node "Каталог LDAP / AD" as dir
+  node "SMTP" as smtp
+}
+
+src --> nginx : HTTP :80
+br --> nginx : HTTP :80
+nginx --> be
+be --> db
+wk --> db
+be --> dir : вход, группы
+wk --> smtp : письма
+@enduml

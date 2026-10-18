@@ -1,0 +1,38 @@
+@startuml 07b-scaling-target
+' Целевая схема, не реализована: Docker Swarm на нескольких хостах, read-реплика БД (ADR-0004).
+' Переход — тот же docker-compose.yml, секции deploy.replicas / placement.
+!include gost.iuml
+
+node "Кластер Docker Swarm" <<execution environment>> {
+  node "routing mesh" as mesh
+  node "Узел 1" <<device>> {
+    node "frontend" <<container>> as fe1
+    node "backend" <<container>> as bk1
+    node "воркеры" <<container>> as wk1
+  }
+  node "Узел N" <<device>> {
+    node "frontend" <<container>> as fe2
+    node "backend" <<container>> as bk2
+    node "воркеры" <<container>> as wk2
+  }
+}
+
+node "Узел БД, primary" <<device>> {
+  database "PostgreSQL\nprimary" as pgp
+}
+node "Узел БД, реплика" <<device>> {
+  database "PostgreSQL\nread-реплика" as pgr
+}
+
+mesh --> fe1
+mesh --> fe2
+fe1 --> bk1
+fe2 --> bk2
+bk1 --> pgp
+bk2 --> pgp
+wk1 --> pgp
+wk2 --> pgp
+pgp -[bold]-> pgr : потоковая\nрепликация
+bk1 ..> pgr : чтение: дашборд,\nистория
+bk2 ..> pgr
+@enduml

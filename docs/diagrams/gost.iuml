@@ -1,0 +1,31 @@
+' Общий стиль схем для курсовой: монохром, без теней и скруглений, Times New Roman.
+' Подпись «Рисунок N — …» ставится в тексте работы, не на схеме.
+' Целевое/отключённое показывается штриховой линией (#line.dashed), а не цветом.
+skinparam monochrome true
+skinparam shadowing false
+skinparam roundCorner 0
+skinparam style strictuml
+skinparam backgroundColor white
+skinparam defaultFontName "Times New Roman"
+skinparam defaultFontSize 14
+skinparam ArrowThickness 1
+skinparam packageStyle rectangle
+' monochrome даёт серую заливку — делаем фигуры белыми
+skinparam {
+  ActorBackgroundColor white
+  UsecaseBackgroundColor white
+  RectangleBackgroundColor white
+  NodeBackgroundColor white
+  DatabaseBackgroundColor white
+  StorageBackgroundColor white
+  ArtifactBackgroundColor white
+  EntityBackgroundColor white
+  ClassBackgroundColor white
+  StateBackgroundColor white
+  NoteBackgroundColor white
+  ParticipantBackgroundColor white
+  SequenceGroupBackgroundColor white
+  SequenceLifeLineBackgroundColor white
+}
+skinparam nodesep 40
+skinparam ranksep 50

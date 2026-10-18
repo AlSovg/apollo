@@ -1,0 +1,42 @@
+@startuml 06b-deploy-dev-host
+' Один хост для разработки. Штриховая граница — подстановки внешних систем (dev-оверлей).
+!include gost.iuml
+
+node "Браузер / источники" <<device>> as client
+
+node "Хост разработчика" <<device>> {
+  node "Docker Compose, проект apollo" <<execution environment>> {
+    rectangle "сеть internal (наружу не публикуется)" {
+      node "frontend\nnginx-unprivileged :8080" <<container>> as fe
+      node "backend × 2\n:8000" <<container>> as be
+      node "normalizer × 2" <<container>> as nm
+      node "router" <<container>> as rt
+      node "delivery" <<container>> as dl
+      node "llm" <<container>> as lm
+      database "db\nPostgreSQL 16" as db
+    }
+    storage "том pgdata" as vol
+
+    rectangle "dev-оверлей" as dev #line.dashed {
+      node "ldap\nOpenLDAP-мок" <<container>> as ldap #line.dashed
+      node "mailpit\nSMTP :1025" <<container>> as mail #line.dashed
+      node "llm-mock" <<container>> as llmm #line.dashed
+      node "simulator\nэмулятор Zabbix и SolarWinds" <<container>> as sim #line.dashed
+    }
+  }
+}
+
+client --> fe : HTTP :80
+fe --> be
+be --> db
+nm --> db
+rt --> db
+dl --> db
+lm --> db
+db -- vol
+be ..> ldap : LDAP
+dl --> mail : SMTP
+lm ..> llmm : HTTP, при\nLLM_PROVIDER=openai
+sim --> be : вебхуки
+mail ..> client : 127.0.0.1:8025\nвеб-интерфейс почты
+@enduml

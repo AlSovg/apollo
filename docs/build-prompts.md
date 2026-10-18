@@ -164,7 +164,7 @@ POST /api/v1/ingest/solarwinds
 Тесты:
 - Фикстуры реальных payload положить в backend/tests/fixtures/:
   zabbix_problem.json, zabbix_resolved.json, solarwinds_trigger.json.
-  Взять их из раздела с примерами в «ФАЙЛИК ДЛЯ САШИ.md».
+  Взять их из раздела с примерами в «local/ФАЙЛИК ДЛЯ САШИ.md».
 - Тест: payload с незнакомым полем всё равно принимается.
 - Тест: неверный токен -> 401, неверная подпись -> 401.
 - Тест: тело больше лимита -> 413.

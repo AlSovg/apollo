@@ -1,0 +1,156 @@
+@startuml 05a-er-events
+' Модель данных, часть 1: события, инциденты, доставка. Источник истины — db/schema.sql.
+!include gost.iuml
+hide circle
+hide empty methods
+skinparam linetype ortho
+
+entity "event_sources" as event_sources {
+  * code : text <<PK>>
+  --
+  * name : text
+  * kind : text
+  adapter_class : text
+  * field_map : jsonb
+  token_hash : bytea
+  hmac_secret : bytea
+  * ip_allowlist : inet[]
+  timezone : text
+  * is_active : boolean
+  last_event_at : timestamptz
+  * created_at : timestamptz
+  * updated_at : timestamptz
+}
+
+entity "severity_map" as severity_map {
+  * source : text <<PK, FK>>
+  * raw_value : text <<PK>>
+  --
+  * severity : smallint
+  * label : text
+}
+
+entity "raw_events\n(секции по received_at)" as raw_events {
+  * id : bigint <<PK>>
+  * received_at : timestamptz <<PK>>
+  --
+  * source : text <<FK>>
+  * payload : jsonb
+  * payload_hash : bytea
+  processed_at : timestamptz
+  process_error : text
+}
+
+entity "monitored_objects" as monitored_objects {
+  * id : bigint <<PK>>
+  --
+  * source : text <<FK>>
+  * external_id : text
+  * name : text
+  ip : inet
+  dns : text
+  os : text
+  vendor : text
+  location : text
+  contact : text
+  object_group : text
+  description : text
+  * attrs : jsonb
+  * first_seen : timestamptz
+  * last_seen : timestamptz
+}
+
+entity "incidents" as incidents {
+  * id : bigint <<PK>>
+  --
+  * source : text <<FK>>
+  * external_key : text
+  * fingerprint : bytea
+  object_id : bigint <<FK>>
+  rule_key : text
+  * rule_name : text
+  rule_expr : text
+  * severity : smallint
+  * severity_raw : text
+  * status : text
+  * opened_at : timestamptz
+  resolved_at : timestamptz
+  duration_s : integer
+  * last_event_at : timestamptz
+  last_notified_at : timestamptz
+  * dedup_count : integer
+  * acknowledged : boolean
+  ack_by : bigint <<FK>>
+  ack_at : timestamptz
+  url : text
+  last_message : text
+  * tags : text[]
+  * is_test : boolean
+  * attrs : jsonb
+  * created_at : timestamptz
+  * updated_at : timestamptz
+}
+
+entity "incident_events\n(секции по event_ts)" as incident_events {
+  * id : bigint <<PK>>
+  * event_ts : timestamptz <<PK>>
+  --
+  * incident_id : bigint <<FK>>
+  * raw_event_id : bigint
+  * kind : text
+  * received_at : timestamptz
+  severity : smallint
+  message : text
+  value : text
+  * attrs : jsonb
+}
+
+entity "llm_summaries" as llm_summaries {
+  * id : bigint <<PK>>
+  --
+  * incident_id : bigint <<FK>>
+  * model : text
+  * prompt_version : text
+  * content : text
+  * masked : boolean
+  latency_ms : integer
+  * created_at : timestamptz
+}
+
+entity "notifications" as notifications {
+  * id : bigint <<PK>>
+  --
+  * incident_id : bigint <<FK>>
+  * user_id : bigint <<FK>>
+  topic_id : bigint <<FK>>
+  * channel : text
+  * status : text
+  * attempts : smallint
+  next_retry_at : timestamptz
+  last_error : text
+  * created_at : timestamptz
+  sent_at : timestamptz
+  read_at : timestamptz
+}
+
+entity "users" as users {
+  * id : bigint <<PK>>
+}
+
+entity "topics" as topics {
+  * id : bigint <<PK>>
+}
+
+event_sources ||--o{ severity_map
+event_sources ||--o{ raw_events
+event_sources ||--o{ monitored_objects
+event_sources ||--o{ incidents
+monitored_objects |o--o{ incidents
+incidents ||--o{ incident_events
+raw_events ||..o{ incident_events : логическая\nсвязь, без FK
+incidents ||--o{ llm_summaries
+incidents ||--o{ notifications
+users ||--o{ notifications
+topics |o--o{ notifications
+users |o--o{ incidents : ack_by
+@enduml
