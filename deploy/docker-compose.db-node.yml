@@ -1,0 +1,45 @@
+# УЗЕЛ БД. Запускается на отдельной машине, без приложения:
+#   docker compose -f docker-compose.db-node.yml up -d
+# Переменные берутся из ../.env этой машины: POSTGRES_USER, POSTGRES_PASSWORD,
+# POSTGRES_DB и DB_BIND_ADDR — адрес узла в оверлейной сети (Tailscale/ZeroTier).
+# Топология и обоснование — docs/topology.md, ADR-0006.
+
+name: apollo-db
+
+services:
+  db:
+    image: postgres:16-alpine
+    env_file: ../.env
+    command:
+      - postgres
+      # Каждый процесс приложения держит свой пул: суммарный потолок
+      # при нескольких репликах превышает дефолтные 100 соединений
+      - -c
+      - max_connections=200
+      - -c
+      - hba_file=/etc/postgresql/pg_hba.conf
+      - -c
+      - password_encryption=scram-sha-256
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+    # Только адрес оверлея. Без DB_BIND_ADDR запуск падает, а не публикует порт
+    # на все интерфейсы
+    ports:
+      - "${DB_BIND_ADDR:?задайте DB_BIND_ADDR — адрес узла в оверлейной сети}:${DB_BIND_PORT:-5432}:5432"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1G
+
+volumes:
+  pgdata:

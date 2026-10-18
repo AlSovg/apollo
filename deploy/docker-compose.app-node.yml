@@ -1,0 +1,58 @@
+# УЗЕЛ ПРИЛОЖЕНИЯ. Накладывается на docker-compose.yml и убирает из него БД:
+#   docker compose -f docker-compose.yml -f docker-compose.app-node.yml up -d
+# DATABASE_URL в ../.env указывает на адрес узла БД в оверлейной сети
+# (postgresql+asyncpg://apollo:<пароль>@<DB_OVERLAY_ADDR>:5432/apollo).
+# Топология и обоснование — docs/topology.md, ADR-0006.
+
+services:
+  db: !reset null
+
+  # Зависимость от db снята: приложение обязано подниматься и жить при
+  # недоступной БД (готовность — /health/ready), а не ждать её на старте
+  backend:
+    depends_on: !reset null
+  normalizer:
+    depends_on: !reset null
+  router:
+    depends_on: !reset null
+  delivery:
+    depends_on: !reset null
+  llm:
+    depends_on: !reset null
+
+  # 80/443 и домен держит системный nginx с certbot: он терминирует TLS и
+  # проксирует на этот порт. Наружу frontend не публикуется. Если nginx стоит
+  # на другой машине, APP_BIND_ADDR — адрес этого узла в оверлее
+  frontend:
+    ports: !override
+      - "${APP_BIND_ADDR:-127.0.0.1}:8088:8080"
+
+  # Эмулятор источников (профиль demo): на публичном стенде реальных Zabbix и
+  # SolarWinds нет, проверяющему нужен живой поток событий. Шлёт вебхуки на
+  # backend по внутренней сети, токены берёт из INGEST_TOKEN_* в ../.env.
+  # Сценарии по запросу — порт только на loopback узла: 127.0.0.1:18082
+  #   docker compose ... --profile demo up -d simulator
+  simulator:
+    profiles: [demo]
+    build:
+      context: ..
+      dockerfile: deploy/mocks/sources/Dockerfile
+    env_file: ../.env
+    environment:
+      SIM_TARGET_URL: http://backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:18082:8080"
+    networks: [internal]
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+volumes:
+  pgdata: !reset null

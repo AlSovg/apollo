@@ -27,6 +27,9 @@ def get_engine() -> AsyncEngine:
             # ждать не базу, а свободное соединение
             pool_size=settings.db_pool_size,
             max_overflow=settings.db_max_overflow,
+            # БД на отдельном узле: при потере маршрута пакеты молча
+            # отбрасываются, и без лимита asyncpg ждёт соединения 60 с
+            connect_args={"timeout": settings.db_connect_timeout_s},
         )
     return _engine
 

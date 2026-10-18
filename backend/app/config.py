@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     # на пиковом приёме — запросы начинают ждать соединение, а не базу
     db_pool_size: int = 20
     db_max_overflow: int = 20
+    # Сколько ждать установки соединения с БД (узел БД — по сети, не сокет)
+    db_connect_timeout_s: float = 5.0
 
     # На сколько месяцев вперёд создавать партиции при старте
     partitions_months_ahead: int = 1

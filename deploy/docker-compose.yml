@@ -7,6 +7,9 @@ services:
   db:
     image: postgres:16-alpine
     env_file: ../.env
+    # Каждый процесс держит свой пул (DB_POOL_SIZE + DB_MAX_OVERFLOW): при
+    # нескольких репликах суммарный потолок превышает дефолтные 100 соединений
+    command: ["postgres", "-c", "max_connections=200"]
     volumes:
       - pgdata:/var/lib/postgresql/data
     # Порт БД наружу НЕ публикуется — доступ только из внутренней сети compose
@@ -50,6 +53,9 @@ services:
       retries: 5
       start_period: 10s
     deploy:
+      # Stateless: любая реплика обслуживает любой запрос (ADR-0003).
+      # Число меняется на лету: docker compose up -d --scale backend=N
+      replicas: 2
       resources:
         limits:
           cpus: "1.0"
@@ -74,6 +80,8 @@ services:
     security_opt:
       - no-new-privileges:true
     deploy:
+      # Реплики делят очередь raw_events через FOR UPDATE SKIP LOCKED (ADR-0002)
+      replicas: 2
       resources:
         limits:
           cpus: "1.0"
