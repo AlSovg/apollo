@@ -71,8 +71,8 @@ class DemoUser:
 
     Обязательные подписки здесь не перечислены — они вычисляются из роли
     (topic_roles в app.seed) и всегда идут в канал web: так задана вьюха
-    v_effective_subscriptions. Email и TrueConf появляются только через
-    добровольную подписку, поэтому каналы указаны именно тут.
+    v_effective_subscriptions. Email появляется только через добровольную
+    подписку, поэтому каналы указаны именно тут.
     """
 
     username: str
@@ -91,17 +91,17 @@ DEMO_USERS: list[DemoUser] = [
     DemoUser(
         username="duty.engineer",
         role="engineer",
-        contacts={"email": "duty.engineer@apollo.test", "trueconf": "duty.engineer"},
+        contacts={"email": "duty.engineer@apollo.test"},
         # обязательные по роли engineer: prod-db, critical-any, scada-asu
         subscriptions={"all-events": ["web"], "web-prod": ["web", "email"]},
     ),
     DemoUser(
         username="shift.lead",
         role="engineer",
-        contacts={"email": "shift.lead@apollo.test", "trueconf": "shift.lead"},
-        # TrueConf — на старшего смены: канал обязателен по условиям кейса,
-        # и на демо он должен на ком-то реально сработать
-        subscriptions={"network-core": ["web", "trueconf"], "sla-watch": ["web", "email"]},
+        contacts={"email": "shift.lead@apollo.test"},
+        # Email на старшего смены: TrueConf на стенде отключён, письма
+        # перехватывает mailpit
+        subscriptions={"network-core": ["web", "email"], "sla-watch": ["web", "email"]},
     ),
     DemoUser(
         username="noc.viewer",
@@ -124,11 +124,11 @@ DEMO_USERS: list[DemoUser] = [
 class DirectoryUser:
     """Доменная учётка, которой стенд назначает подписку заранее.
 
-    При AUTH_PROVIDER=ldap каналы email и TrueConf работают только у доменных
-    учёток: адрес доставки резолвится из каталога, а локальных демо-
-    пользователей там нет. Обязательные подписки по роли идут в web, поэтому
-    без строки в subscriptions доставка в TrueConf на чистом стенде молчит,
-    пока кто-нибудь не подпишется руками.
+    При AUTH_PROVIDER=ldap email работает только у доменных учёток: адрес
+    доставки резолвится из каталога, а локальных демо-пользователей там нет.
+    Обязательные подписки по роли идут в web, поэтому без строки в
+    subscriptions доставка на почту на чистом стенде молчит, пока кто-нибудь
+    не подпишется руками.
 
     Происхождение — assigned: так это и выглядит в бою, когда администратор
     назначает канал сотруднику. Отписаться пользователь не может, но каналы
@@ -140,18 +140,17 @@ class DirectoryUser:
     subscriptions: dict[str, list[str]]
 
 
-# Логины совпадают с deploy/ad/bootstrap-users.sh. Каждой учётке там
-# проставлен свой TrueConf ID (ipPhone) и почта, поэтому сообщения разных
-# дежурных приходят в разные чаты, а не в один общий.
+# Логины совпадают с deploy/ldap/01-structure.ldif. У каждой учётки там свой
+# атрибут mail, поэтому письма разных дежурных приходят в разные ящики mailpit.
 DIRECTORY_USERS: list[DirectoryUser] = [
-    # Дежурный: критичное с тегами sla+prod — в TrueConf
-    DirectoryUser("ad.duty", {"sla-watch": ["web", "trueconf"]}),
-    # Второй инженер: сетевой контур, тоже TrueConf — видно, что канал
-    # работает не на одном избранном пользователе
-    DirectoryUser("ad.eng", {"network-core": ["web", "trueconf"]}),
-    # Наблюдатель: почта. Адрес резолвится из каталога; уйдёт ли письмо,
-    # зависит от SMTP_HOST, и это видно на дашборде доставки
-    DirectoryUser("ad.viewer", {"web-prod": ["web", "email"]}),
+    # Дежурный: критичное с тегами sla+prod
+    DirectoryUser("noc.duty", {"sla-watch": ["web", "email"]}),
+    # Второй инженер: сетевой контур — видно, что канал работает не на одном
+    # избранном пользователе
+    DirectoryUser("eng.network", {"network-core": ["web", "email"]}),
+    # Наблюдатель. Адрес резолвится из каталога; уйдёт ли письмо, зависит
+    # от SMTP_HOST, и это видно на дашборде доставки
+    DirectoryUser("biz.owner", {"web-prod": ["web", "email"]}),
 ]
 
 
@@ -513,7 +512,7 @@ async def _seed_users(session: AsyncSession, password: str | None = None) -> lis
             .on_conflict_do_nothing()
         )
 
-        # Без контакта доставка в email/TrueConf останется без адреса и уйдёт
+        # Без контакта доставка в email останется без адреса и уйдёт
         # в ошибку — на демо это выглядит как неработающий канал
         for channel, address in demo.contacts.items():
             await session.execute(
@@ -532,7 +531,7 @@ async def _seed_subscriptions(session: AsyncSession) -> int:
     Обязательные подписки не заводятся строками — они вычисляются из ролей
     (v_effective_subscriptions) и всегда идут в web. Всё, что здесь, — это
     origin='self': то, что пользователь мог бы включить себе сам, включая
-    выбор каналов email и trueconf.
+    выбор канала email.
     """
     topic_ids: dict[str, int] = {
         row.code: row.id

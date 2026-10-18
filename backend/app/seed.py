@@ -29,8 +29,9 @@ from app.db import get_engine, get_sessionmaker
 from app.models.identity import RoleMapping
 from app.models.subscriptions import Topic, TopicRole
 
-# Тестовый домен apollo.test (deploy/ad). Структура групп повторяет боевую:
-# админы платформы, дежурная смена, владельцы сервисов.
+# Тестовый домен apollo.test (deploy/ldap). Структура групп повторяет боевую:
+# админы платформы, дежурная смена, владельцы сервисов. Первые три DN — формат
+# AD для боевого каталога заказчика.
 DEMO_ROLE_MAPPINGS: list[tuple[str, str]] = [
     ("CN=platform-admins,OU=apollo-groups,DC=apollo,DC=test", "admin"),
     ("CN=noc-engineers,OU=apollo-groups,DC=apollo,DC=test", "engineer"),

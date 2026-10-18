@@ -15,6 +15,7 @@ uid: admin.ops
 cn: Администратор платформы
 sn: Ops
 displayName: Администратор платформы
+mail: admin.ops@apollo.test
 userPassword: admin-pass
 
 dn: uid=noc.duty,ou=people,dc=apollo,dc=test
@@ -23,6 +24,7 @@ uid: noc.duty
 cn: Дежурный смены NOC
 sn: Duty
 displayName: Дежурный смены NOC
+mail: noc.duty@apollo.test
 userPassword: duty-pass
 
 dn: uid=eng.network,ou=people,dc=apollo,dc=test
@@ -31,6 +33,7 @@ uid: eng.network
 cn: Инженер сети
 sn: Network
 displayName: Инженер сети
+mail: eng.network@apollo.test
 userPassword: eng-pass
 
 dn: uid=biz.owner,ou=people,dc=apollo,dc=test
@@ -39,6 +42,7 @@ uid: biz.owner
 cn: Владелец сервиса
 sn: Owner
 displayName: Владелец сервиса
+mail: biz.owner@apollo.test
 userPassword: viewer-pass
 
 dn: uid=no.groups,ou=people,dc=apollo,dc=test
@@ -47,6 +51,7 @@ uid: no.groups
 cn: Сотрудник без ролей
 sn: Nobody
 displayName: Сотрудник без ролей
+mail: no.groups@apollo.test
 userPassword: nobody-pass
 
 dn: cn=platform-admins,ou=groups,dc=apollo,dc=test

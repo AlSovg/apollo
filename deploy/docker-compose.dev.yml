@@ -13,24 +13,6 @@ services:
     ports:
       - "127.0.0.1:55432:5432"
 
-  # Доступ к Samba AD DC на ВМ TrueConf: имя из TLS-сертификата резолвится
-  # вручную, CA домена монтируется для валидации LDAPS (адаптер требует
-  # CERT_REQUIRED — соединение без проверки не защищает от MITM).
-  #
-  # Каталог нужен двум сервисам: backend проверяет вход и синхронизирует
-  # роли, delivery достаёт адреса доставки (email, TrueConf) в момент
-  # отправки. Без доступа у delivery адрес не резолвится, и уведомление
-  # падает в failed с «не удалось определить идентификатор получателя».
-  backend:
-    extra_hosts: &ad_host
-      - "dc1.apollo.test:89.208.86.149"
-    volumes: &ad_ca
-      - ./ad/ca.pem:/certs/ldap-ca.pem:ro
-
-  delivery:
-    extra_hosts: *ad_host
-    volumes: *ad_ca
-
   # Кнопки быстрого входа на экране авторизации: показать конвейер под двумя
   # ролями за один клик, не диктуя пароли со сцены. Учётки задаются только
   # здесь — продуктивная сборка идёт без этих аргументов, и кнопок в ней нет.
@@ -56,18 +38,29 @@ services:
       - "127.0.0.1:1389:389"
     networks: [internal]
 
-  # Подстановка TrueConf Server: те же пути, коды ответов и формат ошибок.
-  # Переключение на боевой сервер — смена TRUECONF_BASE_URL и реквизитов.
-  trueconf:
-    build:
-      context: ..
-      dockerfile: deploy/mocks/trueconf/Dockerfile
-    environment:
-      MOCK_USERNAME: apollo-bot
-      MOCK_PASSWORD: apollo-bot-pass
+  # Перехватчик почты: вместо TrueConf и релея заказчика. Письма не уходят
+  # наружу, а оседают в веб-интерфейсе http://localhost:8025.
+  # Бэкенд ходит на mailpit:1025 без TLS (SMTP_USE_TLS=false).
+  mailpit:
+    image: axllent/mailpit:v1.20
     ports:
-      - "127.0.0.1:18080:8080"
+      - "127.0.0.1:8025:8025"
     networks: [internal]
+
+  # Мок-сервер TrueConf закомментирован: боевая ВМ TrueConf недоступна, канал
+  # заменён email через mailpit. TRUECONF_BASE_URL в .env.example пуст, поэтому
+  # уведомления этого канала уходят в failed, остальной конвейер не страдает.
+  # Раскомментировать, если мок понадобится для тестов адаптера.
+  # trueconf:
+  #   build:
+  #     context: ..
+  #     dockerfile: deploy/mocks/trueconf/Dockerfile
+  #   environment:
+  #     MOCK_USERNAME: apollo-bot
+  #     MOCK_PASSWORD: apollo-bot-pass
+  #   ports:
+  #     - "127.0.0.1:18080:8080"
+  #   networks: [internal]
 
   # Подстановка локальной модели, пока ВМ с Qwen не готова. Контракт тот же
   # (OpenAI-совместимый), переключение — смена LLM_BASE_URL и LLM_MODEL.
@@ -83,7 +76,7 @@ services:
 
   # Эмулятор ВМ №1 и №2 (Zabbix, SolarWinds). На стендовых машинах по замыслу
   # стоит генератор событий (AGENTS.md §3) — здесь он в контейнере, потому что
-  # SSH ни на одну из ВМ не проходит (integration-runbook.md §4). Шлёт те же
+  # SSH ни на одну из ВМ не проходит (docs/integration-runbook.md §4). Шлёт те же
   # вебхуки, что боевые системы: переключение на настоящий источник = docker
   # compose stop simulator.
   #
